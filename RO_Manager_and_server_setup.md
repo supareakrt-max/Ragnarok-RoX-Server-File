@@ -61,6 +61,15 @@
 - Forge Scroll สายใหม่ 60380-60399, สูตร laphine + IG_RT_* ที่ยังว่างอีก 18 ชื่อ
 - ไคลเอนต์ itemInfo: ค้างไว้ทำผ่าน chat
 
+## Player AI `@ai` (ขั้นที่ 1 — ทำ 2026-09-28, ยังไม่ติดตั้ง)
+- อยู่โฟลเดอร์แยก `ai_system/` (ผู้ใช้จะเอาไปใส่ + คอมไพล์เอง) — คู่มือติดตั้ง/ทดสอบใน `ai_system/README.md`
+- ใช้ช่อง `src/custom/` (script.inc + script_def.inc include `ai_player.inc`) → ไม่แตะ .cpp เดิม; ต้องคอมไพล์ map-server ใหม่ (สำรอง exe ไป `backup_before_ai\`)
+- คำสั่งสคริปต์: `ai_on` / `ai_off` / `ai_status`; NPC `ai_menu.txt` (TIS-620) bindatcmd `@ai`, `@ai on`, `@ai off`
+- ขั้นที่ 1: หามอนใกล้สุด (AI_RANGE 3-14, AI_NOBOSS) → unit_attack, ไม่เจอเดินสุ่ม, ไม่แย่งมอนผู้เล่นอื่น, เปลี่ยนเป้าถ้าตีไม่โดน 15 วิ; หยุดเองเมื่อ ตาย/ย้ายแมพ/ในเมือง/น้ำหนัก ≥90%/ออกเกม
+- คอมไพล์ผ่านบน Linux (gcc, ไม่มี warning) — ยังไม่ได้ทดสอบในเกม
+- ขั้นต่อไป: 2 สกิล+บัฟ+ยา, 3 เก็บของ+กลับเมือง, 4 เมนูเพิ่ม, 5 ออฟไลน์/จำกัดสิทธิ์/บอทปลอม
+- หมายเหตุ: `Game\AI\` ในไคลเอนต์ = AI โฮมุน/ทหารรับจ้างของ Gravity (AI.lua, AI_M.lua, USER_AI ก๊อปเหมือนกัน) ห้ามลบ ใช้ทำบอทผู้เล่นไม่ได้
+
 ## Charm Upgrade (แทนระบบ 3→1 เดิม) — ทดสอบผ่าน
 - NPC "ช่างอัพเกรด Charm" prontera 150,193 เปิดหน้าต่าง Laphine ด้วย `laphine_synthesis <scroll id>;` (เลือก Charm → ถ้าไม่มี scroll ให้ซื้อ)
 - Forge Scroll 72 ตัว ID 60300–60379 (id = 60300 + สาย×10 + (lv-1)), Etc, Weight 1 — ใน db/import/item_db.yml

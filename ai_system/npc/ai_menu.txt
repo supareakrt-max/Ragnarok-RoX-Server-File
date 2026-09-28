@@ -1,0 +1,90 @@
+//===== rAthena Script =======================================
+//= Ro-X Player AI - เมนู @ai (ขั้นที่ 1: เปิด/ปิด AI, หามอนแล้วตีธรรมดา)
+//===== คำอธิบาย ============================================
+//= - @ai        เปิดหน้าต่างตั้งค่า AI
+//= - @ai on     เปิด AI ทันที
+//= - @ai off    ปิด AI ทันที
+//= - ต้องใช้ map-server.exe ที่คอมไพล์รวม src/custom/ai_player.inc แล้ว
+//=   (คำสั่ง ai_on / ai_off / ai_status) ถ้ายังไม่ได้คอมไพล์ ไฟล์นี้จะ error ตอนโหลด
+//= - ค่าตั้งเก็บในตัวแปรตัวละคร: AI_RANGE (รัศมี 3-14), AI_NOBOSS (1 = ไม่ตีบอส/MVP)
+//= - AI หยุดเอง เมื่อ: ตาย / ย้ายแมพ / เข้าเมือง / น้ำหนักเกิน 90% / ออกจากเกม
+//= - ไฟล์นี้บันทึกเป็น TIS-620
+//============================================================
+
+-	script	AI_Menu	-1,{
+OnInit:
+	bindatcmd "ai", strnpcinfo(3) + "::OnAtcmd", 0, 99;
+	end;
+
+OnAtcmd:
+	.@arg$ = strtolower(.@atcmd_parameters$[0]);
+	if (.@arg$ == "on") {
+		callsub L_On, 0;
+		end;
+	}
+	if (.@arg$ == "off") {
+		if (ai_off())
+			dispbottom "[AI] ปิด AI แล้ว";
+		else
+			dispbottom "[AI] AI ปิดอยู่แล้ว";
+		end;
+	}
+
+L_Menu:
+	.@range = AI_RANGE ? AI_RANGE : 9;
+	mes "[ ระบบ AI ]";
+	if (ai_status())
+		mes "สถานะ: ^00AA00เปิดอยู่^000000";
+	else
+		mes "สถานะ: ^FF0000ปิดอยู่^000000";
+	mes "รัศมีหามอน: ^0055FF" + .@range + "^000000 ช่อง";
+	mes "ตีบอส / MVP: " + (AI_NOBOSS ? "^FF0000ไม่ตี^000000" : "^00AA00ตี^000000");
+	switch (select((ai_status() ? "ปิด AI" : "เปิด AI") + ":ตั้งรัศมีหามอน:" + (AI_NOBOSS ? "เปลี่ยนเป็น ตีบอส/MVP" : "เปลี่ยนเป็น ไม่ตีบอส/MVP") + ":ปิดหน้าต่าง")) {
+	case 1:
+		clear;
+		mes "[ ระบบ AI ]";
+		if (ai_status()) {
+			ai_off();
+			mes "ปิด AI แล้ว";
+			close;
+		}
+		callsub L_On, 1;
+		close;
+	case 2:
+		clear;
+		mes "[ ระบบ AI ]";
+		mes "ใส่รัศมีหามอน (3-14 ช่อง)";
+		mes "ตอนนี้: " + .@range + " ช่อง";
+		if (input(.@r, 3, 14) != 0) {
+			clear;
+			mes "[ ระบบ AI ]";
+			mes "ต้องเป็นตัวเลข 3-14 เท่านั้น";
+			next;
+		} else
+			AI_RANGE = .@r;
+		clear;
+		goto L_Menu;
+	case 3:
+		AI_NOBOSS = !AI_NOBOSS;
+		clear;
+		goto L_Menu;
+	default:
+		close;
+	}
+
+// getarg(0): 1 = อยู่ในหน้าต่าง (ใช้ mes), 0 = จากคำสั่ง (ใช้ dispbottom)
+L_On:
+	.@r = ai_on();
+	switch (.@r) {
+	case 1:  .@m$ = "[AI] เปิด AI แล้ว - ปิดหน้าต่างนี้เพื่อเริ่มทำงาน"; break;
+	case -1: .@m$ = "[AI] ใช้ AI ในเมืองไม่ได้"; break;
+	case -2: .@m$ = "[AI] ตัวละครเสียชีวิตอยู่"; break;
+	case -3: .@m$ = "[AI] น้ำหนักเกิน 90% ใช้ AI ไม่ได้"; break;
+	default: .@m$ = "[AI] เปิด AI ไม่สำเร็จ"; break;
+	}
+	if (getarg(0))
+		mes .@m$;
+	else
+		dispbottom (.@r == 1 ? "[AI] เปิด AI แล้ว" : .@m$);
+	return;
+}
