@@ -89,6 +89,8 @@ def main():
         sex = rng.choice("MF")
         job = rng.choice(jobs)
         blv = rng.randint(args.min_level, args.max_level)
+        if job == 0:
+            blv = min(blv, 10)  # a Novice changes job at Job Lv 10, long before base 10+
         jlv = 1 if job == 0 else min(50, max(1, blv // 2 + rng.randint(0, 5)))
         skill_points = (jlv - 1) if job == 0 else 9 + (jlv - 1)
         weapon, wloc = JOBS.get(job, JOBS[0])

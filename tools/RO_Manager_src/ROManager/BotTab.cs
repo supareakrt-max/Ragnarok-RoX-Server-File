@@ -125,11 +125,13 @@ internal partial class MainForm
 		fLv.Controls.AddRange(new Control[] { numBotMinLv, new Label { Text = "ถึง", AutoSize = true, Margin = new Padding(3, 6, 3, 3) }, numBotMaxLv });
 		FlowLayoutPanel fJobs = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, Margin = new Padding(0) };
 		foreach (KeyValuePair<string, string> j in new[] {
+			new KeyValuePair<string, string>("Novice", "0"),
 			new KeyValuePair<string, string>("Swordman", "1"), new KeyValuePair<string, string>("Mage", "2"),
 			new KeyValuePair<string, string>("Archer", "3"), new KeyValuePair<string, string>("Acolyte", "4"),
 			new KeyValuePair<string, string>("Merchant", "5"), new KeyValuePair<string, string>("Thief", "6") })
 		{
-			CheckBox c = new CheckBox { Text = j.Key, AutoSize = true, Checked = true, Margin = new Padding(0, 4, 4, 0) };
+			// Novice starts unticked: tick it to create bots that grow into a 1st job by themselves
+			CheckBox c = new CheckBox { Text = j.Key, AutoSize = true, Checked = j.Value != "0", Margin = new Padding(0, 4, 4, 0) };
 			botJobChecks.Add(new KeyValuePair<CheckBox, string>(c, j.Value));
 			fJobs.Controls.Add(c);
 		}
