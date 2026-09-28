@@ -25,14 +25,26 @@ PERSONALITIES = ["hardcore", "merchant", "chill"]
 CHAR_INSERT = re.compile(r"INSERT INTO `char` \([^)]*\) VALUES \((\d+),(\d+),\d+,'((?:[^'\\]|\\.)*)'", re.I)
 
 
+def read_json(path):
+    """Read JSON saved as UTF-8 (with or without BOM) or as Thai ANSI (cp874),
+    which is what Notepad produces on Thai Windows."""
+    with open(path, "rb") as fp:
+        raw = fp.read()
+    for enc in ("utf-8-sig", "cp874"):
+        try:
+            return json.loads(raw.decode(enc))
+        except UnicodeDecodeError:
+            continue
+    return json.loads(raw.decode("utf-8", "replace"))
+
+
 def load_config():
     if not os.path.exists(CONFIG):
         shutil.copyfile(EXAMPLE, CONFIG)
-        cfg = json.load(open(CONFIG, encoding="utf-8"))
+        cfg = read_json(CONFIG)
         cfg["bots"] = []  # drop the example names
         return cfg
-    with open(CONFIG, encoding="utf-8") as fp:
-        return json.load(fp)
+    return read_json(CONFIG)
 
 
 def save_config(cfg):
@@ -56,7 +68,7 @@ def cmd_sync(args):
     json_path = args.json or os.path.splitext(args.sql)[0] + ".json"
     if os.path.exists(json_path):
         try:
-            for b in json.load(open(json_path, encoding="utf-8")).get("bots", []):
+            for b in read_json(json_path).get("bots", []):
                 personality[b["name"].lower()] = b.get("personality")
         except (ValueError, KeyError):
             pass

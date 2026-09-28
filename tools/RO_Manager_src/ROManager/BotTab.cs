@@ -651,7 +651,7 @@ internal partial class MainForm
 
 		string outDir = Path.Combine(BotDir, "generated");
 		Directory.CreateDirectory(outDir);
-		string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+		string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", System.Globalization.CultureInfo.InvariantCulture);
 		string sql = Path.Combine(outDir, "bots_" + stamp + ".sql");
 		string json = Path.Combine(outDir, "bots_" + stamp + ".json");
 

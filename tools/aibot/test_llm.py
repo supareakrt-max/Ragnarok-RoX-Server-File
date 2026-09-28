@@ -27,8 +27,12 @@ async def main():
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    with open(args.config, encoding="utf-8") as fp:
-        cfg = json.load(fp)
+    with open(args.config, "rb") as fp:
+        raw = fp.read()
+    try:
+        cfg = json.loads(raw.decode("utf-8-sig"))
+    except UnicodeDecodeError:
+        cfg = json.loads(raw.decode("cp874"))  # saved as Thai ANSI by Notepad
     llm_cfg = dict(cfg.get("llm", {}))
     llm_cfg["enabled"] = True
     llm_cfg["only_bots"] = []

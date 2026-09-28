@@ -27,8 +27,13 @@ def main():
 
     if not os.path.exists(args.config):
         sys.exit("config %s not found (copy config.example.json)" % args.config)
-    with open(args.config, encoding="utf-8") as fp:
-        config = json.load(fp)
+    with open(args.config, "rb") as fp:
+        raw = fp.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp874")  # saved as Thai ANSI by Notepad
+    config = json.loads(text)
 
     brain = Brain(config, base_dir=os.path.dirname(os.path.abspath(args.config)))
     try:
