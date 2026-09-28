@@ -11618,6 +11618,7 @@ void clif_parse_Emotion(int32 fd, map_session_data *sd){
 		}
 
 		clif_emotion( *sd, emoticon );
+		aibot_on_emotion( *sd, emoticon );
 	} else
 		clif_skill_fail( *sd, 1, USESKILL_FAIL_LEVEL, 1 );
 #endif

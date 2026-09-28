@@ -40,6 +40,8 @@ def main():
         asyncio.run(brain.run())
     except KeyboardInterrupt:
         pass
+    finally:
+        brain.save_memories()
 
 
 if __name__ == "__main__":

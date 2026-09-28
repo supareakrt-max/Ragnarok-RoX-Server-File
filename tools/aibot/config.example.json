@@ -13,6 +13,8 @@
   "max_chat_responders": 2,
   "report_interval": 60,
   "stuck_report": "stuck_report.csv",
+  "memory_dir": "memory",
+  "party_with_bots": false,
   "map_cache": ["../../db/map_cache.dat", "../../db/re/map_cache.dat"],
 
   "llm": {

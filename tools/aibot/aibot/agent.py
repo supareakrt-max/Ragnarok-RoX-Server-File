@@ -4,9 +4,10 @@ Every tick (personality.tick +/- jitter) the agent looks at the latest state the
 server pushed and decides what to do next:
 
     dead?          -> complain, wait, respawn
-    points?        -> allocate stats / skills
-    party invite?  -> accept or decline
+    points?        -> allocate stats / skills, change job when ready
+    party invite?  -> accept or decline (friends more likely)
     survival       -> potion, heal, flee (teleport / go home)
+    party          -> follow / assist / heal a real player partner
     routine        -> farm | town | rest | social
     stuck check    -> random side step, then teleport
     idle social    -> random chat, emotes, drama
@@ -18,9 +19,12 @@ import random
 import time
 
 from .bridge import BridgeError
+from .career import CareerMixin
+from .gear import GearMixin
+from .memory import BotMemory
+from .party_ai import PartyMixin
 from .routine import Routine
 from .social import ChatMemory, system_prompt, template_reply
-from .world import farm_spots_for
 
 log = logging.getLogger("aibot.agent")
 
@@ -32,7 +36,7 @@ def dist(ax, ay, bx, by):
     return max(abs(ax - bx), abs(ay - by))
 
 
-class BotAgent:
+class BotAgent(CareerMixin, GearMixin, PartyMixin):
     def __init__(self, brain, spec, personality):
         self.brain = brain
         self.bridge = brain.bridge
@@ -42,7 +46,8 @@ class BotAgent:
         self.p = personality
         self.rng = random.Random(hash(self.name) ^ int(time.time()))
         self.routine = Routine(personality, brain.clock, self.rng)
-        self.memory = ChatMemory()
+        self.chat = ChatMemory()
+        self.memory = BotMemory(brain.memory_dir, self.name)
 
         self.id = None
         self.state = {}
@@ -79,6 +84,20 @@ class BotAgent:
         self.pending_invite = None
         self.want_invite = None
 
+        # career / learning
+        self.nothing_to_learn = False
+        self.gear_checked_blv = None
+        self.farm_sample = None
+        self.farm_since = 0.0
+        self.hp_potion = None
+        # party
+        self.party_members = []
+        self.partner = None
+        self.partner_seen = 0.0
+        self.buff_times = {}
+        # social
+        self.greeted = {}
+
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
@@ -114,7 +133,7 @@ class BotAgent:
             await asyncio.sleep(len(text) / self.p.typing_cps + self.rng.uniform(0.3, 1.5))
         res = await self.cmd("say", msg=text)
         if res.get("ok"):
-            self.memory.add(self.name, text)
+            self.chat.add(self.name, text)
             self.brain.stats["chat_out"] += 1
 
     async def emote(self, emo):
@@ -178,11 +197,28 @@ class BotAgent:
             return
 
         await self.allocate_points()
+        if await self.maybe_change_job():
+            return
 
         if self.pending_invite:
             await self.answer_invite()
 
+        self.track_farming()
+        self.memory.autosave()
+
         if await self.survival():
+            return
+
+        await self.refresh_party()
+        if self.partner:
+            if self.activity != "party":
+                log.info("%s: %s -> party with %s", self.name, self.activity, self.partner)
+                self.activity = "party"
+                self.goal = None
+                if s.get("sit"):
+                    await self.cmd("stand")
+            await self.do_party()
+            await self.check_stuck()
             return
 
         activity = self.routine.current()
@@ -223,6 +259,8 @@ class BotAgent:
 
         if s["dead"] and not self.prev_dead:
             self.brain.stats["deaths"] += 1
+            if s["map"] == self.farm_map:
+                self.memory.add_death(s["map"])
             self.dead_since = time.monotonic()
             self.target = None
             if self.rng.random() < 0.6:
@@ -267,6 +305,7 @@ class BotAgent:
                 if res.get("ok"):
                     break
         if s.get("skpts", 0) > 0:
+            learned = False
             for skill, max_lv in self.job["learn"]:
                 if skill in self.skill_done:
                     continue
@@ -275,8 +314,13 @@ class BotAgent:
                 if lv >= max_lv:
                     self.skill_done.add(skill)
                 if res.get("ok"):
+                    learned = True
                     break
                 # maxed, or requirements not met yet: try the next skill
+            # nothing learnable with the current job: allow the job change anyway
+            self.nothing_to_learn = not learned
+        else:
+            self.nothing_to_learn = False
 
     # ------------------------------------------------------------------
     # survival
@@ -331,9 +375,8 @@ class BotAgent:
 
     async def do_farm(self):
         s = self.state
-        if self.farm_map is None:
-            spot = self.rng.choice(farm_spots_for(self.world, s["blv"]))
-            self.farm_map = spot["map"]
+        if self.farm_map is None or (self.should_rethink_map() and self.target is None):
+            self.farm_map = self.choose_farm_map()
         if s["map"] != self.farm_map:
             await self.cmd("warp", map=self.farm_map, x=0, y=0)
             return
@@ -368,6 +411,14 @@ class BotAgent:
             return
 
         mine = [m for m in mobs if m["target"] == s["aid"]]
+        await self.greet_players(scan["players"])
+
+        # surrounded: teleport out before it goes wrong
+        if len(mine) >= 3 and self.hp_ratio < 0.7:
+            self.brain.stats["swarm_escapes"] += 1
+            await self.cmd("tele")
+            self.target = None
+            return
 
         # keep current target if it is still alive and progress is being made
         current = next((m for m in mobs if m["id"] == self.target), None)
@@ -387,7 +438,8 @@ class BotAgent:
                 return
 
         self.target = None
-        if not mine and self.hp_ratio < 0.45:
+        caster = self.job.get("skill_chance", 0) >= 0.8
+        if not mine and (self.hp_ratio < 0.45 or (caster and self.sp_ratio < 0.2)):
             await self.cmd("sit")
             return
 
@@ -493,13 +545,10 @@ class BotAgent:
             self.brain.stats["zeny_earned"] += res["zeny_gained"]
             await self.emote(EMO_MONEY)
         await self.refresh_inventory(force=True)
-        have = self.count_item(self.p.potion_item)
-        if have < self.p.potion_stock:
-            await self.cmd("buy", item=self.p.potion_item, amount=self.p.potion_stock - have)
-        if self.p.sp_potion_item and self.count_item(self.p.sp_potion_item) < 10:
-            await self.cmd("buy", item=self.p.sp_potion_item, amount=10)
+        await self.buy_potions()
         await self.refresh_inventory(force=True)
         await self.upgrade_equipment()
+        await self.buy_gear()
 
     async def upgrade_equipment(self):
         blv = self.state["blv"]
@@ -656,6 +705,8 @@ class BotAgent:
             return
         self.pending_invite = None
         chance = self.p.accept_party * (0.5 if inv.get("from_bot") else 1.0)
+        if not inv.get("from_bot"):
+            chance = min(0.98, chance + 0.08 * self.memory.friendship(inv["from"]))
         accept = self.rng.random() < chance
         res = await self.cmd("party_reply", accept=accept)
         if not res.get("ok"):
@@ -675,26 +726,38 @@ class BotAgent:
         ev["answer_at"] = time.monotonic() + self.rng.uniform(2, 6)
         self.pending_invite = ev
 
-    def context_line(self):
+    def context_line(self, speaker=None):
         s = self.state
-        return "Lv.%s อยู่แมพ %s กำลัง%s" % (
-            s.get("blv"), s.get("map"),
-            {"farm": "เก็บเวล", "town": "ขายของในเมือง", "rest": "นั่งพัก", "social": "เดินเล่นคุยกับเพื่อน"}.get(self.activity, "เดินเล่น"),
+        line = "%s Lv.%s/%s อยู่แมพ %s กำลัง%s" % (
+            self.job_name(), s.get("blv"), s.get("jlv"), s.get("map"),
+            {"farm": "เก็บเวล", "town": "ขายของในเมือง", "rest": "นั่งพัก", "social": "เดินเล่นคุยกับเพื่อน",
+             "party": "ปาร์ตี้เก็บเวลกับ %s" % self.partner}.get(self.activity, "เดินเล่น"),
         )
+        if speaker:
+            line += ". " + self.memory.describe(speaker)
+        diary = self.memory.data["log"][-2:]
+        if diary:
+            line += ". เรื่องล่าสุดของคุณ: " + " / ".join(d["text"] for d in diary)
+        return line
 
     async def compose_reply(self, speaker, text, mentioned, remember=True):
         if remember:
-            self.memory.add(speaker, text)
+            self.chat.add(speaker, text)
         reply = None
         if self.brain.llm.allowed(self.name):
-            reply = await self.brain.llm.reply(system_prompt(self.name, self.p, self.context_line()), self.memory.as_messages(self.name), bot_name=self.name)
+            reply = await self.brain.llm.reply(system_prompt(self.name, self.p, self.context_line(speaker)), self.chat.as_messages(self.name), bot_name=self.name)
         if not reply:
             reply = template_reply(self.p, text, self.rng, mentioned=mentioned, busy=self.target is not None)
+            # greet people it knows by name
+            if reply and self.memory.friendship(speaker) >= 3 and self.rng.random() < 0.5:
+                reply = self.p.phrase("greet_known", self.rng).format(name=speaker)
         return reply
 
     async def on_chat(self, ev):
         text = ev["msg"]
-        self.memory.add(ev["from"], text)
+        self.chat.add(ev["from"], text)
+        if not ev.get("from_bot"):
+            self.memory.chatted(ev["from"], text)
         mentioned = self.name.lower() in text.lower()
         if ev.get("from_bot"):
             if time.monotonic() - self.last_bot_reply < 45:
@@ -713,6 +776,8 @@ class BotAgent:
         await self.say(reply)
 
     async def on_whisper(self, ev):
+        if not ev.get("from_bot"):
+            self.memory.chatted(ev["from"], ev["msg"])
         if ev.get("from_bot") and self.rng.random() > 0.3:
             return
         if self.rng.random() > 0.9:
@@ -722,6 +787,38 @@ class BotAgent:
         await asyncio.sleep(len(reply) / self.p.typing_cps + self.rng.uniform(1, 3))
         await self.cmd("whisper", to=ev["from"], msg=reply)
         self.brain.stats["chat_out"] += 1
+
+    async def greet_players(self, players):
+        """Say hi to real players passing by; known players get greeted by name."""
+        now = time.monotonic()
+        for pl in players:
+            if pl.get("bot") or pl["dist"] > 7:
+                continue
+            new_meeting = self.memory.saw(pl["name"])
+            if not new_meeting or now - self.greeted.get(pl["name"], 0) < 1800:
+                continue
+            self.greeted[pl["name"]] = now
+            friend = self.memory.friendship(pl["name"])
+            if friend >= 3 and self.rng.random() < 0.7:
+                await self.emote(EMO_DELIGHT)
+                await self.say(self.p.phrase("greet_known", self.rng).format(name=pl["name"]))
+            elif self.rng.random() < self.p.chattiness * 0.3:
+                if self.rng.random() < 0.5:
+                    await self.emote(self.rng.choice([EMO_DELIGHT, 18, 33]))
+                else:
+                    await self.say(self.p.phrase("greet", self.rng))
+            return  # one greeting per tick is enough
+
+    async def on_emotion(self, ev):
+        """Answer emotes from players nearby."""
+        if not self.cooldown("emote_back", 8) or self.rng.random() > 0.6:
+            return
+        answers = {
+            2: [2, 18], 18: [18, 2], 3: [3, 2], 15: [33, 18], 21: [21, 2], 1: [1, 22], 0: [0, 1],
+            28: [17, 28], 7: [17, 4], 6: [4, 17], 16: [16, 18], 33: [33], 38: [38, 21],
+        }
+        await asyncio.sleep(self.rng.uniform(0.5, 2.0))
+        await self.emote(self.rng.choice(answers.get(ev["type"], [18, 2])))
 
     async def on_party_chat(self, ev):
         chance = self.p.bot_chat_chance if ev.get("from_bot") else max(self.p.chattiness, 0.4)

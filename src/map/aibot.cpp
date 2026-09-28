@@ -414,6 +414,8 @@ int32 scan_sub( block_list* bl, va_list ap ){
 			p["party"] = tsd->status.party_id;
 			p["bot"] = tsd->state.aibot != 0;
 			p["dead"] = pc_isdead( tsd );
+			p["hp"] = tsd->battle_status.hp;
+			p["mhp"] = tsd->battle_status.max_hp;
 			p["sit"] = pc_issit( tsd ) && !pc_isdead( tsd );
 			p["vending"] = tsd->state.vending != 0;
 			p["dist"] = distance_bl( self, bl );
@@ -1221,6 +1223,144 @@ void cmd_party_reply( const json& req, json& res ){
 	res["ok"] = true;
 }
 
+void cmd_jobchange( const json& req, json& res ){
+	map_session_data* sd = bot_sd( req.value( "bot", 0u ) );
+
+	if( sd == nullptr ){ res["error"] = "unknown_bot"; return; }
+	if( !bot_can_act( sd, res ) ) return;
+
+	int32 job = req.value( "job", -1 );
+
+	if( !pcdb_checkid( job ) ){
+		res["error"] = "invalid_job";
+		return;
+	}
+	if( !pc_jobchange( sd, job, 0 ) ){
+		res["error"] = "jobchange_failed";
+		return;
+	}
+	res["ok"] = true;
+	res["class"] = sd->status.class_;
+	res["jlv"] = sd->status.job_level;
+	res["skpts"] = sd->status.skill_point;
+}
+
+json player_json( map_session_data* tsd ){
+	json p;
+	p["id"] = tsd->id;
+	p["cid"] = tsd->status.char_id;
+	p["name"] = to_utf8( tsd->status.name );
+	p["map"] = mapindex_id2name( tsd->mapindex );
+	p["x"] = tsd->x;
+	p["y"] = tsd->y;
+	p["hp"] = tsd->battle_status.hp;
+	p["mhp"] = tsd->battle_status.max_hp;
+	p["sp"] = tsd->battle_status.sp;
+	p["msp"] = tsd->battle_status.max_sp;
+	p["blv"] = tsd->status.base_level;
+	p["class"] = tsd->status.class_;
+	p["dead"] = pc_isdead( tsd );
+	p["bot"] = tsd->state.aibot != 0;
+	p["target"] = tsd->ud.target;
+	p["party"] = tsd->status.party_id;
+	return p;
+}
+
+/// Members of the bot's party, with live position/HP for the ones on this map-server.
+void cmd_party_info( const json& req, json& res ){
+	map_session_data* sd = bot_sd( req.value( "bot", 0u ) );
+
+	if( sd == nullptr ){ res["error"] = "unknown_bot"; return; }
+	if( sd->status.party_id == 0 ){ res["error"] = "no_party"; return; }
+
+	party_data* p = party_search( sd->status.party_id );
+
+	if( p == nullptr ){ res["error"] = "no_party"; return; }
+
+	res["party"] = p->party.party_id;
+	res["name"] = to_utf8( p->party.name );
+	res["members"] = json::array();
+	for( int32 i = 0; i < MAX_PARTY; i++ ){
+		const party_member& m = p->party.member[i];
+
+		if( m.account_id == 0 )
+			continue;
+
+		json j;
+		map_session_data* tsd = p->data[i].sd;
+
+		if( tsd != nullptr )
+			j = player_json( tsd );
+		else{
+			j["cid"] = m.char_id;
+			j["name"] = to_utf8( m.name );
+			j["map"] = m.map;
+			j["class"] = m.class_;
+			j["blv"] = m.lv;
+		}
+		j["online"] = m.online != 0;
+		j["leader"] = m.leader != 0;
+		res["members"].push_back( j );
+	}
+	res["ok"] = true;
+}
+
+/// Where is a player (on this map-server)?
+void cmd_find( const json& req, json& res ){
+	std::string name = from_utf8( req.value( "name", std::string() ) );
+	map_session_data* tsd = name.empty() ? nullptr : map_nick2sd( name.c_str(), false );
+
+	if( tsd == nullptr || tsd->prev == nullptr || pc_isinvisible( tsd ) ){
+		res["error"] = "not_found";
+		return;
+	}
+	res["player"] = player_json( tsd );
+	res["ok"] = true;
+}
+
+/// Same rule as pc_job_can_use_item() in pc.cpp (static there).
+bool bot_job_can_use( map_session_data* sd, const item_data* item ){
+	uint64 job = 1ULL << ( sd->class_ & MAPID_BASEMASK );
+	size_t index = ( sd->class_ & JOBL_2_1 ) ? 1 : ( ( sd->class_ & JOBL_2_2 ) ? 2 : 0 );
+
+	return ( item->class_base[index] & job ) != 0;
+}
+
+/// Item details before buying: price, slot, level and whether the bot may use it.
+void cmd_iteminfo( const json& req, json& res ){
+	map_session_data* sd = bot_sd( req.value( "bot", 0u ) );
+
+	if( sd == nullptr ){ res["error"] = "unknown_bot"; return; }
+
+	res["items"] = json::array();
+	if( req.contains( "items" ) ){
+		for( const auto& v : req["items"] ){
+			t_itemid nameid = v.get<t_itemid>();
+			std::shared_ptr<item_data> id = item_db.find( nameid );
+
+			if( id == nullptr )
+				continue;
+
+			json j;
+			j["id"] = nameid;
+			j["name"] = to_utf8( id->ename.c_str() );
+			j["type"] = id->type;
+			j["subtype"] = id->subtype;
+			j["loc"] = id->equip;
+			j["elv"] = id->elv;
+			j["atk"] = id->atk;
+			j["def"] = id->def;
+			j["weight"] = id->weight;
+			j["buy"] = id->value_buy;
+			j["sell"] = id->value_sell;
+			// level, gender, upper/baby tier (pc_charm_usable) and the job itself
+			j["usable"] = pc_charm_usable( sd, id.get() ) && bot_job_can_use( sd, id.get() );
+			res["items"].push_back( j );
+		}
+	}
+	res["ok"] = true;
+}
+
 void cmd_party_leave( const json& req, json& res ){
 	map_session_data* sd = bot_sd( req.value( "bot", 0u ) );
 
@@ -1269,6 +1409,10 @@ const std::unordered_map<std::string, cmd_func> commands = {
 	{ "party_invite", cmd_party_invite },
 	{ "party_reply", cmd_party_reply },
 	{ "party_leave", cmd_party_leave },
+	{ "party_info", cmd_party_info },
+	{ "jobchange", cmd_jobchange },
+	{ "find", cmd_find },
+	{ "iteminfo", cmd_iteminfo },
 };
 
 void handle_line( int32 fd, const char* data, size_t len ){
@@ -1717,6 +1861,26 @@ void aibot_on_party_chat( int32 party_id, uint32 from_account_id, const char* me
 	}
 	if( !ev["bots"].empty() )
 		broadcast( ev );
+}
+
+void aibot_on_emotion( map_session_data& sd, int32 type ){
+	if( bots.empty() || !has_listeners() || sd.prev == nullptr )
+		return;
+
+	std::vector<uint32> nearby;
+	map_foreachinallrange( nearby_bots_sub, &sd, cfg.chat_range, BL_PC, &nearby, sd.id );
+
+	if( nearby.empty() )
+		return;
+
+	json ev;
+	ev["ev"] = "emotion";
+	ev["from"] = to_utf8( sd.status.name );
+	ev["from_id"] = sd.id;
+	ev["from_bot"] = sd.state.aibot != 0;
+	ev["type"] = type;
+	ev["bots"] = nearby;
+	broadcast( ev );
 }
 
 void aibot_on_party_invite( map_session_data& bot, map_session_data& inviter ){

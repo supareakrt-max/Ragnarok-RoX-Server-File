@@ -39,6 +39,9 @@ class Brain:
         for path in config.get("map_cache", []):
             self.mapcache.load(path if os.path.isabs(path) else os.path.join(base_dir, path))
 
+        mem = config.get("memory_dir", "memory")
+        self.memory_dir = mem if os.path.isabs(mem) else os.path.join(base_dir, mem)
+        self.item_cache = {}
         self.agents = {}
         self.by_id = {}
         self.stats = Counter()
@@ -64,6 +67,7 @@ class Brain:
         b.on("whisper", self.on_whisper)
         b.on("party_chat", self.on_party_chat)
         b.on("party_invite", self.on_party_invite)
+        b.on("emotion", self.on_emotion)
 
     def grid(self, mapname):
         return self.mapcache.get(mapname) if mapname else None
@@ -175,7 +179,9 @@ class Brain:
             if agent in responders:
                 asyncio.create_task(agent.on_chat(ev))
             else:
-                agent.memory.add(ev["from"], ev["msg"])
+                agent.chat.add(ev["from"], ev["msg"])
+                if not ev.get("from_bot"):
+                    agent.memory.chatted(ev["from"], ev["msg"])
 
     def on_whisper(self, ev):
         agent = self.by_id.get(ev["bot"])
@@ -189,6 +195,18 @@ class Brain:
             if agent:
                 asyncio.create_task(agent.on_party_chat(ev))
                 break  # one bot answers per line
+
+    def on_emotion(self, ev):
+        if ev.get("from_bot"):
+            return
+        listeners = [self.by_id[b] for b in ev["bots"] if b in self.by_id and self.by_id[b].spawned.is_set()]
+        random.shuffle(listeners)
+        for agent in listeners[:2]:
+            asyncio.create_task(agent.on_emotion(ev))
+
+    def save_memories(self):
+        for agent in self.agents.values():
+            agent.memory.save()
 
     def on_party_invite(self, ev):
         agent = self.by_id.get(ev["bot"])
