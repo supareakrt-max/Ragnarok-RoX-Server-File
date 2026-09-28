@@ -72,6 +72,7 @@ struct s_aibot {
 	std::string name;
 	bool ready = false;          // fully spawned on a map at least once
 	int32 loadend_tid = INVALID_TIMER;
+	int32 attack_target = 0;     // monster the bot keeps attacking (see aibot_chase_timer)
 	int16 loadend_tries = 0;
 };
 
@@ -82,6 +83,8 @@ struct s_aibot_client {
 int32 listen_fd = -1;
 RecvFunc listen_default_recv = nullptr;
 int32 state_tid = INVALID_TIMER;
+int32 chase_tid = INVALID_TIMER;
+constexpr t_tick CHASE_INTERVAL = 250;
 std::unordered_map<int32, s_aibot_client> clients;   // fd -> client
 std::unordered_map<uint32, s_aibot> bots;            // char_id -> bot
 std::unordered_map<uint32, uint32> bot_by_account;   // account_id -> char_id
@@ -675,11 +678,16 @@ void cmd_attack( const json& req, json& res ){
 
 	bot_stand( sd );
 	// unit_attack returns walking stop flags, not success: check the resulting target instead
-	unit_attack( sd, target, req.value( "continuous", true ) ? 1 : 0 );
+	bool continuous = req.value( "continuous", true );
+	unit_attack( sd, target, continuous ? 1 : 0 );
 	if( sd->ud.target != target && sd->ud.target_to != target ){
 		res["error"] = "attack_failed";
 		return;
 	}
+	// A client re-sends the attack when it reaches the target; bots have the
+	// chase timer do that for them.
+	if( continuous )
+		bots[sd->status.char_id].attack_target = target;
 	res["ok"] = true;
 }
 
@@ -1298,6 +1306,16 @@ void handle_line( int32 fd, const char* data, size_t len ){
 
 	auto it = commands.find( cmd );
 
+	// Any new action replaces a pending chase/attack
+	static const std::unordered_set<std::string> actions = {
+		"walk", "stop", "attack", "skill", "sit", "pickup", "warp", "tele", "respawn", "logout",
+	};
+	if( actions.count( cmd ) && req.contains( "bot" ) && req["bot"].is_number_unsigned() ){
+		auto bit = bots.find( req["bot"].get<uint32>() );
+		if( bit != bots.end() )
+			bit->second.attack_target = 0;
+	}
+
 	if( it == commands.end() ){
 		res["ok"] = false;
 		res["error"] = "unknown_command";
@@ -1470,6 +1488,42 @@ TIMER_FUNC( aibot_loadend_timer ){
 	}
 
 	bot.loadend_tid = add_timer( tick + LOADEND_INTERVAL, aibot_loadend_timer, id, 0 );
+	return 0;
+}
+
+/// Keeps bots attacking their target: walks into range and restarts the attack
+/// whenever it stopped (what the game client does for real players).
+TIMER_FUNC( aibot_chase_timer ){
+	for( auto& it : bots ){
+		s_aibot& bot = it.second;
+
+		if( bot.attack_target == 0 )
+			continue;
+
+		map_session_data* sd = bot_sd( it.first );
+		block_list* bl = map_id2bl( bot.attack_target );
+
+		if( sd == nullptr || sd->prev == nullptr || pc_isdead( sd ) || bl == nullptr || bl->prev == nullptr
+			|| bl->m != sd->m || status_isdead( *bl ) || !check_distance_bl( sd, bl, cfg.scan_range_max ) ){
+			bot.attack_target = 0;
+			continue;
+		}
+
+		unit_data& ud = sd->ud;
+
+		if( ud.target == bot.attack_target || ud.skilltimer != INVALID_TIMER || pc_issit( sd ) )
+			continue; // already attacking / busy
+		if( unit_is_walking( sd ) && ud.target_to == bot.attack_target )
+			continue; // still chasing
+
+		int32 range = status_get_range( sd );
+
+		if( battle_check_range( sd, bl, range ) )
+			unit_attack( sd, bot.attack_target, 1 );
+		else if( !unit_walktobl( sd, bl, range, 2 ) )
+			bot.attack_target = 0; // unreachable, let the brain pick another one
+	}
+
 	return 0;
 }
 
@@ -1681,6 +1735,7 @@ void do_init_aibot(){
 
 	add_timer_func_list( aibot_loadend_timer, "aibot_loadend_timer" );
 	add_timer_func_list( aibot_state_timer, "aibot_state_timer" );
+	add_timer_func_list( aibot_chase_timer, "aibot_chase_timer" );
 
 	if( !cfg.enabled ){
 		ShowInfo( "AI bot bridge is " CL_RED "disabled" CL_RESET " (conf/aibot.conf).\n" );
@@ -1699,6 +1754,7 @@ void do_init_aibot(){
 	session[listen_fd]->func_recv = aibot_accept;
 
 	state_tid = add_timer_interval( gettick() + cfg.state_interval, aibot_state_timer, 0, 0, cfg.state_interval );
+	chase_tid = add_timer_interval( gettick() + CHASE_INTERVAL, aibot_chase_timer, 0, 0, CHASE_INTERVAL );
 
 	ShowStatus( "AI bot bridge listening on '" CL_WHITE "%s:%u" CL_RESET "'%s.\n", cfg.bind_ip.c_str(), cfg.port, cfg.token.empty() ? " (no token!)" : "" );
 }
@@ -1707,6 +1763,10 @@ void do_final_aibot(){
 	if( state_tid != INVALID_TIMER ){
 		delete_timer( state_tid, aibot_state_timer );
 		state_tid = INVALID_TIMER;
+	}
+	if( chase_tid != INVALID_TIMER ){
+		delete_timer( chase_tid, aibot_chase_timer );
+		chase_tid = INVALID_TIMER;
 	}
 
 	for( auto& it : bots ){
