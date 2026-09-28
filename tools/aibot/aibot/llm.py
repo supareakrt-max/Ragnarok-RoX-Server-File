@@ -31,7 +31,7 @@ PRESETS = {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
         "chat_path": "/chat/completions",
         "api_key_env": "GEMINI_API_KEY",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-3.8-flash",
         "daily_limit": 1000,
         "rpm": 8,
     },

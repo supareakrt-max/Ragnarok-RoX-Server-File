@@ -26,7 +26,7 @@
     "max_concurrency": 2,
     "usage_file": "llm_usage.json",
     "providers": [
-      {"provider": "gemini", "model": "gemini-2.5-flash", "daily_limit": 1000, "rpm": 8},
+      {"provider": "gemini", "model": "gemini-3.8-flash", "daily_limit": 1000, "rpm": 8},
       {"provider": "groq", "model": "openai/gpt-oss-20b", "daily_limit": 300, "rpm": 20}
     ]
   },
