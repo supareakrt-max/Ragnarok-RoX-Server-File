@@ -1,0 +1,156 @@
+//===== rAthena Script =======================================
+//= Npc RoX : คุมมอนในแมพ (สั่งจาก RO_Manager แท็บ "มอนสเตอร์")
+//===== คำอธิบาย ============================================
+//= - RO_Manager เขียนคำสั่งลงตาราง rox_mobcmd, NPC นี้อ่านทุก 3 วินาที
+//=     spawn  เสกมอน (map, mob_id, amount, x, y, msg ประกาศ)
+//=     kill   ฆ่ามอน (mob_id 0 = ทุกตัวในแมพ มอนประจำแมพจะเกิดใหม่ตามเวลาเดิม)
+//=     count  นับมอนที่มีชีวิตในแมพ -> ตาราง rox_mobcount
+//=     flag   setbattleflag ค่าใน monster.conf แบบไม่ต้องรีสตาร์ท
+//= - rox_mobtimer: เสกบอส/MVP ตามเวลา (นาทีของวัน + วันในสัปดาห์ 0=อาทิตย์)
+//= - rox_mobflag: ค่าปัจจุบันของ monster.conf + _heartbeat ให้ RO_Manager รู้ว่า NPC ทำงาน
+//= - ไฟล์นี้บันทึกเป็น TIS-620
+//============================================================
+
+-	script	RoX_MobCtl	-1,{
+OnInit:
+	query_sql "CREATE TABLE IF NOT EXISTS `rox_mobcmd` (`id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,`cmd` VARCHAR(16) NOT NULL,`map` VARCHAR(16) NOT NULL DEFAULT '',`mob_id` INT NOT NULL DEFAULT 0,`amount` INT NOT NULL DEFAULT 1,`x` INT NOT NULL DEFAULT 0,`y` INT NOT NULL DEFAULT 0,`flag` VARCHAR(48) NOT NULL DEFAULT '',`value` INT NOT NULL DEFAULT 0,`msg` VARCHAR(200) NOT NULL DEFAULT '',`status` TINYINT NOT NULL DEFAULT 0,`result` VARCHAR(255) NOT NULL DEFAULT '',`created` DATETIME NULL,`done` DATETIME NULL) ENGINE=MyISAM";
+	query_sql "CREATE TABLE IF NOT EXISTS `rox_mobcount` (`map` VARCHAR(16) NOT NULL,`mob_id` INT NOT NULL,`name` VARCHAR(48) NOT NULL DEFAULT '',`cnt` INT NOT NULL DEFAULT 0,`updated` DATETIME NULL,PRIMARY KEY (`map`,`mob_id`)) ENGINE=MyISAM";
+	query_sql "CREATE TABLE IF NOT EXISTS `rox_mobflag` (`flag` VARCHAR(48) NOT NULL PRIMARY KEY,`value` INT NOT NULL DEFAULT 0,`updated` DATETIME NULL) ENGINE=MyISAM";
+	query_sql "CREATE TABLE IF NOT EXISTS `rox_mobtimer` (`id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,`enabled` TINYINT NOT NULL DEFAULT 1,`map` VARCHAR(16) NOT NULL,`x` INT NOT NULL DEFAULT 0,`y` INT NOT NULL DEFAULT 0,`mob_id` INT NOT NULL,`amount` INT NOT NULL DEFAULT 1,`minute` INT NOT NULL DEFAULT 0,`days` VARCHAR(16) NOT NULL DEFAULT '0123456',`skip_alive` TINYINT NOT NULL DEFAULT 1,`msg` VARCHAR(200) NOT NULL DEFAULT '',`last_run` VARCHAR(16) NOT NULL DEFAULT '') ENGINE=MyISAM";
+	// คำสั่งที่ค้างตอนเซิร์ฟปิด ไม่ต้องทำย้อนหลัง
+	query_sql "UPDATE `rox_mobcmd` SET `status`=2, `result`='skipped: server restarted', `done`=NOW() WHERE `status`=0 AND `created` < NOW() - INTERVAL 5 MINUTE";
+	setarray .flags$[0],
+		"mob_count_rate", "mob_spawn_delay", "boss_spawn_delay", "plant_spawn_delay",
+		"monster_hp_rate", "mvp_hp_rate", "mob_skill_rate", "mob_skill_delay",
+		"monster_active_enable", "view_range_rate", "chase_range_rate", "show_mob_info",
+		"mvp_tomb_enabled", "ksprotection", "no_spawn_on_player", "mob_remove_damaged",
+		"monster_loot_type";
+	callsub S_Flags;
+	.lastmin = -1;
+	debugmes "[RoX Mob] พร้อมรับคำสั่งจาก RO_Manager";
+	initnpctimer;
+	end;
+
+OnTimer3000:
+	stopnpctimer;
+	for (.@n = 0; .@n < 10; .@n++) {
+		deletearray .@id;
+		query_sql "SELECT `id`,`cmd`,`map`,`mob_id`,`amount`,`x`,`y`,`flag`,`value`,`msg` FROM `rox_mobcmd` WHERE `status`=0 ORDER BY `id` LIMIT 1", .@id, .@cmd$, .@map$, .@mob, .@amt, .@x, .@y, .@flag$, .@val, .@msg$;
+		if (getarraysize(.@id) == 0)
+			break;
+		.@res$ = callsub(S_Do, .@cmd$, .@map$, .@mob, .@amt, .@x, .@y, .@flag$, .@val, .@msg$);
+		query_sql "UPDATE `rox_mobcmd` SET `status`=" + (compare(.@res$, "error") ? 2 : 1) + ", `result`='" + escape_sql(.@res$) + "', `done`=NOW() WHERE `id`=" + .@id;
+		debugmes "[RoX Mob] " + .@cmd$ + " " + .@map$ + " " + .@mob + " -> " + .@res$;
+	}
+	.@now = gettime(DT_HOUR) * 60 + gettime(DT_MINUTE);
+	if (.@now != .lastmin) {
+		.lastmin = .@now;
+		callsub S_Timers, .@now;
+		query_sql "REPLACE INTO `rox_mobflag` (`flag`,`value`,`updated`) VALUES ('_heartbeat'," + gettimetick(2) + ",NOW())";
+	}
+	initnpctimer;
+	end;
+
+// S_Do(cmd$, map$, mob_id, amount, x, y, flag$, value, msg$) -> "ok ..." / "error ..."
+S_Do:
+	.@cmd$ = getarg(0);
+	.@map$ = getarg(1);
+	.@mob = getarg(2);
+	.@amt = getarg(3);
+	if (.@cmd$ == "flag") {
+		setbattleflag getarg(6), getarg(7);
+		callsub S_Flags;
+		return "ok " + getarg(6) + "=" + getbattleflag(getarg(6));
+	}
+	if (.@cmd$ == "flags") {
+		callsub S_Flags;
+		return "ok";
+	}
+	if (getmapusers(.@map$) < 0)
+		return "error no map " + .@map$;
+	if (.@cmd$ == "spawn") {
+		if (getmonsterinfo(.@mob, MOB_NAME) == "null")
+			return "error no monster " + .@mob;
+		.@amt = cap_value(.@amt, 1, 500);
+		monster .@map$, getarg(4), getarg(5), "--ja--", .@mob, .@amt;
+		if (getarg(8) != "")
+			announce getarg(8), bc_all, 0xFF8866;
+		return "ok " + .@amt + " x " + getmonsterinfo(.@mob, MOB_NAME);
+	}
+	if (.@cmd$ == "kill") {
+		if (.@mob <= 0) {
+			.@c = getmapunits(BL_MOB, .@map$);
+			killmonsterall .@map$;
+			return "ok " + .@c;
+		}
+		.@c = getmapunits(BL_MOB, .@map$, .@gid);
+		for (.@i = 0; .@i < .@c; .@i++) {
+			getunitdata .@gid[.@i], .@d;
+			if (.@d[UMOB_CLASS] == .@mob) {
+				unitkill .@gid[.@i];
+				.@k++;
+			}
+		}
+		return "ok " + .@k;
+	}
+	if (.@cmd$ == "count") {
+		query_sql "DELETE FROM `rox_mobcount` WHERE `map`='" + escape_sql(.@map$) + "'";
+		.@c = getmapunits(BL_MOB, .@map$, .@gid);
+		for (.@i = 0; .@i < .@c; .@i++) {
+			getunitdata .@gid[.@i], .@d;
+			.@cls = .@d[UMOB_CLASS];
+			for (.@j = 0; .@j < .@nids; .@j++)
+				if (.@ids[.@j] == .@cls)
+					break;
+			if (.@j == .@nids) {
+				.@ids[.@j] = .@cls;
+				.@nids++;
+			}
+			.@cnt[.@j]++;
+		}
+		for (.@j = 0; .@j < .@nids; .@j++)
+			query_sql "INSERT INTO `rox_mobcount` (`map`,`mob_id`,`name`,`cnt`,`updated`) VALUES ('" + escape_sql(.@map$) + "'," + .@ids[.@j] + ",'" + escape_sql(getmonsterinfo(.@ids[.@j], MOB_NAME)) + "'," + .@cnt[.@j] + ",NOW())";
+		return "ok " + .@c;
+	}
+	return "error unknown command " + .@cmd$;
+
+// S_Timers(minute of day): boss / MVP on a schedule
+S_Timers:
+	.@today$ = gettimestr("%Y-%m-%d", 11);
+	.@dow$ = "" + gettime(DT_DAYOFWEEK);
+	query_sql "SELECT `id`,`map`,`x`,`y`,`mob_id`,`amount`,`days`,`skip_alive`,`msg` FROM `rox_mobtimer` WHERE `enabled`=1 AND `minute`=" + getarg(0) + " AND `last_run`<>'" + .@today$ + "' LIMIT 100", .@id, .@map$, .@x, .@y, .@mob, .@amt, .@days$, .@skip, .@msg$;
+	for (.@i = 0; .@i < getarraysize(.@id); .@i++) {
+		if (!compare(.@days$[.@i], .@dow$))
+			continue;
+		query_sql "UPDATE `rox_mobtimer` SET `last_run`='" + .@today$ + "' WHERE `id`=" + .@id[.@i];
+		if (getmapusers(.@map$[.@i]) < 0 || getmonsterinfo(.@mob[.@i], MOB_NAME) == "null") {
+			debugmes "[RoX Mob] timer " + .@id[.@i] + ": bad map/monster";
+			continue;
+		}
+		if (.@skip[.@i] && callsub(S_Alive, .@map$[.@i], .@mob[.@i]) > 0) {
+			debugmes "[RoX Mob] timer " + .@id[.@i] + ": " + getmonsterinfo(.@mob[.@i], MOB_NAME) + " still alive on " + .@map$[.@i];
+			continue;
+		}
+		monster .@map$[.@i], .@x[.@i], .@y[.@i], "--ja--", .@mob[.@i], cap_value(.@amt[.@i], 1, 100);
+		if (.@msg$[.@i] != "")
+			announce .@msg$[.@i], bc_all, 0xFF4444;
+		debugmes "[RoX Mob] timer " + .@id[.@i] + ": spawned " + getmonsterinfo(.@mob[.@i], MOB_NAME) + " on " + .@map$[.@i];
+	}
+	return;
+
+// S_Alive(map$, mob_id) -> how many of that monster are alive on the map
+S_Alive:
+	.@c = getmapunits(BL_MOB, getarg(0), .@gid);
+	for (.@i = 0; .@i < .@c; .@i++) {
+		getunitdata .@gid[.@i], .@d;
+		if (.@d[UMOB_CLASS] == getarg(1))
+			.@k++;
+	}
+	return .@k;
+
+S_Flags:
+	for (.@i = 0; .@i < getarraysize(.flags$); .@i++)
+		query_sql "REPLACE INTO `rox_mobflag` (`flag`,`value`,`updated`) VALUES ('" + .flags$[.@i] + "'," + getbattleflag(.flags$[.@i]) + ",NOW())";
+	query_sql "REPLACE INTO `rox_mobflag` (`flag`,`value`,`updated`) VALUES ('_heartbeat'," + gettimetick(2) + ",NOW())";
+	return;
+}

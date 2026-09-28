@@ -1046,6 +1046,7 @@ internal partial class MainForm : Form
 		LoadPaths();
 		InitBotTab();
 		InitTimeTab();
+		InitMobTab();
 		Timer val = new Timer();
 		val.Interval = 200;
 		uiTimer = val;
@@ -1127,6 +1128,7 @@ internal partial class MainForm : Form
 		tabs.TabPages.Add(BuildRateTab());
 		tabs.TabPages.Add(BuildBotTab());
 		tabs.TabPages.Add(BuildTimeTab());
+		tabs.TabPages.Add(BuildMobTab());
 		tabs.SelectedIndexChanged += delegate
 		{
 			if (tabs.SelectedIndex == 1)
