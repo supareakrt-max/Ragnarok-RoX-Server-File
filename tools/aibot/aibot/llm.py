@@ -16,6 +16,7 @@ Usage counters are saved to "usage_file" so restarting the brain does not
 reset the daily count. Only the Python standard library is used."""
 
 import asyncio
+import random
 import datetime
 import json
 import logging
@@ -254,10 +255,20 @@ class LLMClient:
         """One line of in-game chat, or None."""
         return await self.complete(system, messages, bot_name, raw=False)
 
-    async def complete(self, system, messages, bot_name=None, raw=True, max_tokens=None):
-        """Raw model output (raw=True) or a cleaned chat line; None when no provider answered."""
+    async def complete(self, system, messages, bot_name=None, raw=True, max_tokens=None, max_wait=5):
+        """Raw model output (raw=True) or a cleaned chat line; None when no provider answered.
+        max_wait: seconds we may wait for a provider's per-minute limit (chat wants
+        a fast answer, the planner can wait)."""
         if not self.enabled or (bot_name and not self.allowed(bot_name)):
             return None
+        # a caller that can wait queues outside the semaphore, so chat replies
+        # are not stuck behind it
+        deadline = time.monotonic() + max_wait
+        while True:
+            waits = [p.wait_time() for p in self.providers if p.available(self.used_today(p))]
+            if not waits or min(waits) <= 5 or time.monotonic() + min(waits) > deadline:
+                break
+            await asyncio.sleep(min(waits) + random.uniform(0, 3))
         async with self._sem:
             for provider in self.providers:
                 if not provider.available(self.used_today(provider)):

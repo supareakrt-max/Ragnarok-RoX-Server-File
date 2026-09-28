@@ -105,7 +105,7 @@ class PlannerMixin:
             ) % (self.name, self.p.llm_style)
             text = await self.brain.llm.complete(
                 system, [{"role": "user", "content": self._plan_prompt(maps)}],
-                bot_name=self.name, max_tokens=self.brain.planner_max_tokens)
+                bot_name=self.name, max_tokens=self.brain.planner_max_tokens, max_wait=90)
             plan = parse_plan(text)
             if not plan:
                 log.info("%s: planner got no usable plan (%r)", self.name, (text or "")[:80])

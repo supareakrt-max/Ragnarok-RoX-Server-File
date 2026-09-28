@@ -59,7 +59,7 @@ async def main():
             print("[%s] FAILED (%s) - see the log above" % (provider.name, provider.model))
             continue
         # planner test: the same request the bots send every ~hour
-        plan_text = await client.complete(PLAN_SYSTEM, [{"role": "user", "content": PLAN_PROMPT}], max_tokens=400)
+        plan_text = await client.complete(PLAN_SYSTEM, [{"role": "user", "content": PLAN_PROMPT}], max_tokens=400, max_wait=60)
         plan = parse_plan(plan_text)
         if plan:
             print("[%s] PLAN OK: %s" % (provider.name, json.dumps(plan, ensure_ascii=False)))
