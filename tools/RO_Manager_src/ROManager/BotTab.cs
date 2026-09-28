@@ -689,7 +689,16 @@ internal partial class MainForm
 			string p = Path.Combine(BotDir, "config.json");
 			if (!File.Exists(p))
 				return set;
-			string text = File.ReadAllText(p, Encoding.UTF8);
+			byte[] raw = File.ReadAllBytes(p);
+			string text;
+			try
+			{
+				text = new UTF8Encoding(false, true).GetString(raw); // strict: throws on non UTF-8
+			}
+			catch (DecoderFallbackException)
+			{
+				text = Encoding.GetEncoding(874).GetString(raw); // saved as Thai ANSI by Notepad
+			}
 			int i = text.IndexOf("\"bots\"", StringComparison.Ordinal);
 			if (i < 0)
 				return set;
