@@ -53,6 +53,14 @@
 - **ค้าง:** ผู้ใช้รัน `Data Game\collect_fix.bat` → ได้ `rox_fix_files.zip` (ไฟล์ชื่อเลข 00000.. ตาม `rox_fix_list.txt`) → Claude แพ็กเข้า rox_fix2.grf (ต้องคง msgstringtable/skilldescript/หมวกงูไว้)
 - `Data Game\rox_item_checklist.txt` = รายการ ID ให้ผู้ใช้ @item เช็กทีละชิ้น
 
+## Charm สายบอส + ดูด HP/SP (กำลังทำ 2026-09-28)
+- **สถานะ:** แก้ `npc/Npc RoX/charm_system.txt` แล้ว (ดรอป 10 สาย, ช่างอัพเกรด/ร้าน Scroll รองรับ 10 สาย) — **ยังห้ามใช้ไฟล์นี้จนกว่าจะเพิ่มไอเทมใน db/import** (รอผู้ใช้ส่ง db/import/item_db.yml, laphine_synthesis.yml, item_group_db.yml — โฟลเดอร์นี้ไม่อยู่ใน git)
+- สาย 8 โจมบอส 60180-60189: +1..+9 = `bonus2 bAddRace,RC_Boss,N`; +10 = บอส 10% + ATK 3% (pre-re ใช้ `bonus2 bAddClass,Class_All,3` แทน bAtkRate)
+- สาย 9 โจมเวทบอส 60190-60199: +1..+9 = `bonus2 bMagicAddRace,RC_Boss,N`; +10 = บอส 10% + `bonus bMatkRate,3`
+- 60210 Charm ดูด HP / 60211 Charm ดูด SP (lv10, ไม่มีสาย): โอกาส 10% ดูด 10% (`bHPDrainRate/bSPDrainRate,100,10`) + MaxHP 2% + MaxSP 2% — ยังไม่กำหนดที่มา (ตอนนี้ @item เท่านั้น)
+- Forge Scroll สายใหม่ 60380-60399, สูตร laphine + IG_RT_* ที่ยังว่างอีก 18 ชื่อ
+- ไคลเอนต์ itemInfo: ค้างไว้ทำผ่าน chat
+
 ## Charm Upgrade (แทนระบบ 3→1 เดิม) — ทดสอบผ่าน
 - NPC "ช่างอัพเกรด Charm" prontera 150,193 เปิดหน้าต่าง Laphine ด้วย `laphine_synthesis <scroll id>;` (เลือก Charm → ถ้าไม่มี scroll ให้ซื้อ)
 - Forge Scroll 72 ตัว ID 60300–60379 (id = 60300 + สาย×10 + (lv-1)), Etc, Weight 1 — ใน db/import/item_db.yml
