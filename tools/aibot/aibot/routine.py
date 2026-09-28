@@ -6,7 +6,7 @@ import datetime
 import random
 import time
 
-ACTIVITIES = ("farm", "town", "rest", "social")
+ACTIVITIES = ("farm", "town", "rest", "social", "resupply")
 
 
 def _minutes(hhmm):
@@ -34,9 +34,19 @@ class Clock:
 
 
 class Routine:
-    def __init__(self, personality, clock, rng=None):
+    def __init__(self, personality, clock, rng=None, cycle=None):
         self.rng = rng or random.Random()
         self.clock = clock
+        # cycle mode: ignore the clock, farm for a long stretch, then go back to
+        # town to sell/buy and rest for a few minutes, and repeat
+        cycle = personality.data.get("cycle") or cycle
+        self.cycle = cycle if cycle and cycle.get("enabled", True) else None
+        if self.cycle:
+            self.farm_range = [float(v) for v in self.cycle.get("farm_minutes", [60, 120])]
+            self.town_range = [float(v) for v in self.cycle.get("town_minutes", [5, 10])]
+            self.phase = "farm"
+            # the first stretch is random so bots don't all walk back to town together
+            self.phase_until = time.monotonic() + self.rng.uniform(0.2, 1.0) * self._length(self.farm_range)
         self.offset = self.rng.uniform(-1, 1) * personality.schedule_offset_minutes
         self.blocks = [
             (_minutes(b["from"]), _minutes(b["to"]), b["activity"]) for b in personality.schedule
@@ -52,10 +62,20 @@ class Routine:
     def clear_override(self):
         self.override = None
 
+    def _length(self, rng_minutes):
+        lo, hi = rng_minutes[0], rng_minutes[-1]
+        return self.rng.uniform(min(lo, hi), max(lo, hi)) * 60
+
     def current(self):
         if self.override and time.monotonic() < self.override_until:
             return self.override
         self.override = None
+        if self.cycle:
+            now = time.monotonic()
+            if now >= self.phase_until:
+                self.phase = "resupply" if self.phase == "farm" else "farm"
+                self.phase_until = now + self._length(self.town_range if self.phase == "resupply" else self.farm_range)
+            return self.phase
         minute = (self.clock.minute_of_day() + self.offset) % 1440
         for start, end, activity in self.blocks:
             if start <= minute < end:

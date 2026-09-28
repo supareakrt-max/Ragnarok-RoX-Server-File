@@ -45,7 +45,7 @@ class BotAgent(CareerMixin, GearMixin, PartyMixin):
         self.name = spec["name"]
         self.p = personality
         self.rng = random.Random(hash(self.name) ^ int(time.time()))
-        self.routine = Routine(personality, brain.clock, self.rng)
+        self.routine = Routine(personality, brain.clock, self.rng, brain.config.get("cycle"))
         self.chat = ChatMemory()
         self.memory = BotMemory(brain.memory_dir, self.name)
 
@@ -569,6 +569,13 @@ class BotAgent(CareerMixin, GearMixin, PartyMixin):
                     await self.refresh_inventory(force=True)
                     return
 
+    async def do_resupply(self):
+        """Cycle mode town break: sell + buy first, then sit down and rest."""
+        if not self.town_done:
+            await self.do_town()
+            return
+        await self.do_rest()
+
     async def do_rest(self):
         s = self.state
         town_name = self.world["home_town"]
@@ -730,7 +737,7 @@ class BotAgent(CareerMixin, GearMixin, PartyMixin):
         s = self.state
         line = "%s Lv.%s/%s อยู่แมพ %s กำลัง%s" % (
             self.job_name(), s.get("blv"), s.get("jlv"), s.get("map"),
-            {"farm": "เก็บเวล", "town": "ขายของในเมือง", "rest": "นั่งพัก", "social": "เดินเล่นคุยกับเพื่อน",
+            {"farm": "เก็บเวล", "town": "ขายของในเมือง", "resupply": "กลับเมืองมาซื้อของกับพัก", "rest": "นั่งพัก", "social": "เดินเล่นคุยกับเพื่อน",
              "party": "ปาร์ตี้เก็บเวลกับ %s" % self.partner}.get(self.activity, "เดินเล่น"),
         )
         if speaker:
