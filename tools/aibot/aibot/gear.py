@@ -59,7 +59,7 @@ class GearMixin:
             await self.cmd("buy", item=self.p.sp_potion_item, amount=10)
 
     async def buy_gear(self):
-        """Buy at most two upgrades per town visit, only once per base level."""
+        """Buy up to four upgrades (one per slot) per town visit, once per base level."""
         s = self.state
         if self.gear_checked_blv == s["blv"]:
             return
@@ -94,20 +94,22 @@ class GearMixin:
             gain = it.get(stat, 0) - current
             if gain <= 0:
                 continue
-            # value for money
-            score = gain / (1 + it["buy"] / 1000.0)
+            # strongest item within budget; cheaper one wins a tie
+            score = gain - it["buy"] / 1e7
             if key not in best_by_slot or score > best_by_slot[key][0]:
                 best_by_slot[key] = (score, it)
 
         bought = 0
-        for score, it in sorted(best_by_slot.values(), key=lambda x: -x[0])[:2]:
-            if it["buy"] > self.state.get("zeny", 0) * 0.5:
+        remaining = budget  # half of the money for the whole visit
+        for score, it in sorted(best_by_slot.values(), key=lambda x: -x[0])[:4]:
+            if it["buy"] > remaining:
                 continue
             res = await self.cmd("buy", item=it["id"], amount=1)
             if not res.get("ok"):
                 continue
             await self.refresh_inventory(force=True)
             new = next((i for i in self.inventory if i["id"] == it["id"] and not i.get("equipped")), None)
+            remaining -= it["buy"]
             if new and (await self.cmd("equip", idx=new["idx"])).get("ok"):
                 bought += 1
                 self.brain.stats["gear_bought"] += 1
