@@ -23,6 +23,7 @@ from .career import CareerMixin
 from .gear import GearMixin
 from .memory import BotMemory
 from .party_ai import PartyMixin
+from .planner import PlannerMixin
 from .routine import Routine
 from .social import ChatMemory, system_prompt, template_reply
 
@@ -36,7 +37,7 @@ def dist(ax, ay, bx, by):
     return max(abs(ax - bx), abs(ay - by))
 
 
-class BotAgent(CareerMixin, GearMixin, PartyMixin):
+class BotAgent(CareerMixin, GearMixin, PartyMixin, PlannerMixin):
     def __init__(self, brain, spec, personality):
         self.brain = brain
         self.bridge = brain.bridge
@@ -97,6 +98,10 @@ class BotAgent(CareerMixin, GearMixin, PartyMixin):
         self.buff_times = {}
         # social
         self.greeted = {}
+        # LLM planner
+        self.plan = None
+        self.planning = False
+        self.next_plan_at = None
 
     # ------------------------------------------------------------------
     # helpers
@@ -205,6 +210,7 @@ class BotAgent(CareerMixin, GearMixin, PartyMixin):
 
         self.track_farming()
         self.memory.autosave()
+        self.maybe_plan()
 
         if await self.survival():
             return
@@ -740,6 +746,9 @@ class BotAgent(CareerMixin, GearMixin, PartyMixin):
             {"farm": "เก็บเวล", "town": "ขายของในเมือง", "resupply": "กลับเมืองมาซื้อของกับพัก", "rest": "นั่งพัก", "social": "เดินเล่นคุยกับเพื่อน",
              "party": "ปาร์ตี้เก็บเวลกับ %s" % self.partner}.get(self.activity, "เดินเล่น"),
         )
+        goal = self.plan_goal()
+        if goal:
+            line += ". เป้าหมายตอนนี้: " + goal
         if speaker:
             line += ". " + self.memory.describe(speaker)
         diary = self.memory.data["log"][-2:]

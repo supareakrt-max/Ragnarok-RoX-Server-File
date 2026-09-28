@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from aibot.llm import LLMClient  # noqa: E402
 from aibot.personality import load_personalities  # noqa: E402
+from aibot.planner import parse_plan  # noqa: E402
 from aibot.social import system_prompt  # noqa: E402
 
 
@@ -56,6 +57,28 @@ async def main():
             print("[%s] OK %.0fms (%s): %s" % (provider.name, ms, provider.model, reply))
         else:
             print("[%s] FAILED (%s) - see the log above" % (provider.name, provider.model))
+            continue
+        # planner test: the same request the bots send every ~hour
+        plan_text = await client.complete(PLAN_SYSTEM, [{"role": "user", "content": PLAN_PROMPT}], max_tokens=400)
+        plan = parse_plan(plan_text)
+        if plan:
+            print("[%s] PLAN OK: %s" % (provider.name, json.dumps(plan, ensure_ascii=False)))
+        else:
+            print("[%s] PLAN FAILED: %r" % (provider.name, (plan_text or "")[:200]))
+
+
+PLAN_SYSTEM = (
+    "คุณคือความคิดของผู้เล่นเกม Ragnarok Online ชื่อ NongFern นิสัย: สบายๆ ชอบคุยกับเพื่อน. "
+    "วางแผนว่าจะทำอะไรต่อจากนี้ให้เหมือนคนเล่นจริง. ตอบ JSON อย่างเดียว ไม่มีคำอธิบาย."
+)
+PLAN_PROMPT = """อาชีพ Acolyte Base Lv.25 Job Lv.33
+อาชีพถัดไป: Priest (ต้อง Job Lv.40)
+เงิน 12000 z, ยาแดง/ยาฟื้น 15 ขวด, กระเป๋าหนัก 40%
+อยู่แมพ prt_fild05, ตามตารางปกติตอนนี้จะเก็บเวล
+แมพเก็บเวลที่เหมาะกับเลเวล:
+- prt_fild05: ได้ ~12% ของเลเวลต่อชม., ตายไป 0 ครั้ง
+- prt_sewb1: ยังไม่เคยลอง, ตายไป 0 ครั้ง
+ตอบเป็น JSON อย่างเดียว: {"goal": "เป้าหมายสั้นๆ ไม่เกิน 12 คำ", "activity": "farm|town|social|rest", "map": "ชื่อแมพจากรายการถ้า activity เป็น farm ไม่งั้น \"\"", "minutes": 20-120, "say": "ประโยคสั้นๆ ที่อยากพิมพ์ในแชทตอนนี้ หรือ \"\""}"""
 
 
 if __name__ == "__main__":

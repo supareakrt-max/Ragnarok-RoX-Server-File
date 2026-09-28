@@ -81,6 +81,11 @@ class CareerMixin:
 
     def choose_farm_map(self):
         spots = [sp["map"] for sp in farm_spots_for(self.world, self.state["blv"])]
+        planned = self.plan["map"] if self.plan_active() else None
+        if planned in spots:
+            log.info("%s: farm map %s (ตามแผน)", self.name, planned)
+            self.farm_since = time.monotonic()
+            return planned
         scored = [(self.memory.map_score(m), m) for m in spots]
         untried = [m for sc, m in scored if sc is None]
         known = sorted(((sc, m) for sc, m in scored if sc is not None), reverse=True)

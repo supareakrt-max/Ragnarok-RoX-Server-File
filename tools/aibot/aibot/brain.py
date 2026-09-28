@@ -12,6 +12,7 @@ from .agent import BotAgent
 from .bridge import Bridge, BridgeError
 from .mapcache import MapCache
 from .personality import load_personalities
+from .planner import planner_bots
 from .routine import Clock
 from .social import LLMClient
 from .world import load_world
@@ -49,6 +50,15 @@ class Brain:
         self.stuck_file = config.get("stuck_report")
         self.max_chat_responders = int(config.get("max_chat_responders", 2))
         self.spawn_interval = float(config.get("spawn_interval", 1.5))
+        pcfg = config.get("planner") or {}
+        self.planner_bots = planner_bots(config)
+        self.planner_interval = [float(v) for v in pcfg.get("interval_minutes", [45, 75])]
+        self.planner_first_delay = [float(v) * 60 for v in pcfg.get("first_plan_minutes", [1, 10])]
+        self.planner_max_tokens = int(pcfg.get("max_tokens", 400))
+        if self.planner_bots and not self.llm.enabled:
+            log.warning("planner enabled but the LLM is off: bots keep deciding by themselves")
+        elif self.planner_bots:
+            log.info("LLM planner on for %d bots", len(self.planner_bots))
 
         for spec in config.get("bots", []):
             pname = spec.get("personality") or random.choice(sorted(self.personalities))

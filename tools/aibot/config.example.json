@@ -31,6 +31,14 @@
     ]
   },
 
+  "planner": {
+    "enabled": false,
+    "bots": [],
+    "max_bots": 10,
+    "interval_minutes": [45, 75],
+    "first_plan_minutes": [1, 10]
+  },
+
   "personalities": {
     "chill": {
       "chattiness": 0.5

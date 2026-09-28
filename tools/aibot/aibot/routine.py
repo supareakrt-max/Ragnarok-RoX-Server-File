@@ -53,6 +53,8 @@ class Routine:
         ]
         self.override = None
         self.override_until = 0.0
+        self.plan = None
+        self.plan_until = 0.0
 
     def force(self, activity, seconds):
         """Temporarily override the schedule (e.g. go to town to sell)."""
@@ -62,6 +64,11 @@ class Routine:
     def clear_override(self):
         self.override = None
 
+    def set_plan(self, activity, seconds):
+        """Activity chosen by the LLM planner; weaker than force(), stronger than the schedule."""
+        self.plan = activity
+        self.plan_until = time.monotonic() + seconds
+
     def _length(self, rng_minutes):
         lo, hi = rng_minutes[0], rng_minutes[-1]
         return self.rng.uniform(min(lo, hi), max(lo, hi)) * 60
@@ -70,6 +77,13 @@ class Routine:
         if self.override and time.monotonic() < self.override_until:
             return self.override
         self.override = None
+        if self.plan and time.monotonic() < self.plan_until:
+            return self.plan
+        self.plan = None
+        return self.natural()
+
+    def natural(self):
+        """What the schedule (or the farm/town cycle) says, ignoring overrides."""
         if self.cycle:
             now = time.monotonic()
             if now >= self.phase_until:

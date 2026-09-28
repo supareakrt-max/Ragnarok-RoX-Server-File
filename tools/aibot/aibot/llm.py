@@ -119,16 +119,17 @@ class Provider:
         return max(0.0, 60.0 / self.rpm - (time.monotonic() - self.last_call))
 
     # -- HTTP -------------------------------------------------------------
-    def request(self, system, messages):
+    def request(self, system, messages, max_tokens=None):
+        max_tokens = max_tokens or self.max_tokens
         if self.kind == "anthropic":
             url = self.base_url + "/v1/messages"
-            body = {"model": self.model, "max_tokens": self.max_tokens, "system": system, "messages": messages}
+            body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": messages}
             headers = {"content-type": "application/json", "x-api-key": self.api_key, "anthropic-version": "2023-06-01"}
         else:
             url = self.base_url + self.chat_path
             body = {
                 "model": self.model,
-                "max_tokens": self.max_tokens,
+                "max_tokens": max_tokens,
                 "temperature": self.temperature,
                 "messages": [{"role": "system", "content": system}] + messages,
             }
@@ -230,6 +231,11 @@ class LLMClient:
 
     # -- main entry ----------------------------------------------------------
     async def reply(self, system, messages, bot_name=None):
+        """One line of in-game chat, or None."""
+        return await self.complete(system, messages, bot_name, raw=False)
+
+    async def complete(self, system, messages, bot_name=None, raw=True, max_tokens=None):
+        """Raw model output (raw=True) or a cleaned chat line; None when no provider answered."""
         if not self.enabled or (bot_name and not self.allowed(bot_name)):
             return None
         async with self._sem:
@@ -245,7 +251,7 @@ class LLMClient:
                 self.stats["calls"] += 1
                 self._count(provider)
                 try:
-                    text = await asyncio.to_thread(provider.request, system, messages)
+                    text = await asyncio.to_thread(provider.request, system, messages, max_tokens)
                 except urllib.error.HTTPError as exc:
                     self._handle_http_error(provider, exc)
                     self.stats["failed"] += 1
@@ -256,7 +262,7 @@ class LLMClient:
                     self.stats["failed"] += 1
                     continue
                 provider.consecutive_429 = 0
-                text = clean_reply(text)
+                text = (text or "").strip() if raw else clean_reply(text)
                 if text:
                     self.stats["ok"] += 1
                     return text
