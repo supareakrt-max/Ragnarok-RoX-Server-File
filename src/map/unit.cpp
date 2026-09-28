@@ -3257,6 +3257,11 @@ static int32 unit_attack_timer_sub(struct block_list* src, int32 tid, t_tick tic
 		range++; // Extra range when chasing (does not apply to mobs locked in an icewall)
 
 	if(sd && !check_distance_client_bl(src,target,range)) {
+		// AI bots have no client that walks for them: chase server side
+		if( sd->state.aibot ){
+			unit_walktobl( src, target, range, 2 );
+			return 1;
+		}
 		// Player tries to attack but target is too far, notify client
 		clif_movetoattack( *sd, *target );
 		return 1;

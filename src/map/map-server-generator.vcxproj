@@ -193,6 +193,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="achievement.hpp" />
+    <ClInclude Include="aibot.hpp" />
     <ClInclude Include="atcommand.hpp" />
     <ClInclude Include="battle.hpp" />
     <ClInclude Include="battleground.hpp" />
@@ -242,6 +243,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="achievement.cpp" />
+    <ClCompile Include="aibot.cpp" />
     <ClCompile Include="atcommand.cpp" />
     <ClCompile Include="battle.cpp" />
     <ClCompile Include="battleground.cpp" />

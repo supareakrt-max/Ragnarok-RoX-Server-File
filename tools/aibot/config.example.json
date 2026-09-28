@@ -1,0 +1,42 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 7100,
+    "token": "",
+    "timeout": 5
+  },
+
+  "time_scale": 1.0,
+  "start_hour": null,
+  "spawn_interval": 1.5,
+  "max_commands_per_sec": 300,
+  "max_chat_responders": 2,
+  "report_interval": 60,
+  "stuck_report": "stuck_report.csv",
+  "map_cache": ["../../db/map_cache.dat", "../../db/re/map_cache.dat"],
+
+  "llm": {
+    "enabled": false,
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5-20251001",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "max_tokens": 80,
+    "timeout": 8,
+    "min_interval": 2.0,
+    "max_concurrency": 4
+  },
+
+  "personalities": {
+    "chill": {
+      "chattiness": 0.5
+    }
+  },
+
+  "world": {},
+
+  "bots": [
+    {"name": "Mew_Dark", "personality": "hardcore"},
+    {"name": "PBank", "personality": "merchant"},
+    {"name": "NongFern", "personality": "chill"}
+  ]
+}

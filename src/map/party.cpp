@@ -16,6 +16,7 @@
 #include <common/utils.hpp>
 
 #include "achievement.hpp"
+#include "aibot.hpp"
 #include "atcommand.hpp"	//msg_txt()
 #include "battle.hpp"
 #include "chrif.hpp" // charserver_name
@@ -452,7 +453,7 @@ bool party_invite( map_session_data& sd, map_session_data *tsd ){
 	}
 
 	// You can't invite someone who has already disconnected.
-	if( !session_isActive( tsd->fd ) ){
+	if( !session_isActive( tsd->fd ) && !tsd->state.aibot ){
 		clif_party_invite_reply( sd, tsd->status.name, PARTY_REPLY_REJECTED );
 		return false;
 	}
@@ -467,6 +468,9 @@ bool party_invite( map_session_data& sd, map_session_data *tsd ){
 	tsd->party_invite_account = sd.status.account_id;
 
 	clif_party_invite( sd, *tsd );
+
+	if( tsd->state.aibot )
+		aibot_on_party_invite( *tsd, sd );
 
 	return true;
 }
@@ -1116,6 +1120,14 @@ int32 party_recv_message( int32 party_id, uint32 account_id, const char *mes, si
 	if( (p=party_search(party_id))==nullptr)
 		return 0;
 	clif_party_message( *p, account_id, mes, len );
+
+	std::vector<uint32> bots;
+	for( int32 i = 0; i < MAX_PARTY; i++ ){
+		if( p->data[i].sd != nullptr && p->data[i].sd->state.aibot )
+			bots.push_back( p->data[i].sd->status.char_id );
+	}
+	if( !bots.empty() )
+		aibot_on_party_chat( party_id, account_id, mes, bots );
 	return 0;
 }
 

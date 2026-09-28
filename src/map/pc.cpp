@@ -30,6 +30,7 @@
 #include <common/utils.hpp>
 
 #include "achievement.hpp"
+#include "aibot.hpp"
 #include "atcommand.hpp" // get_atcommand_level()
 #include "battle.hpp" // battle_config
 #include "battleground.hpp"
@@ -7215,6 +7216,10 @@ enum e_setpos pc_setpos(map_session_data* sd, uint16 mapindex, int32 x, int32 y,
 		vending_update(*sd);
 	if (sd->state.buyingstore)
 		buyingstore_update(*sd);
+
+	// AI bots have no client to acknowledge the map load
+	if (sd->state.aibot && sd->prev == nullptr)
+		aibot_request_loadend(*sd);
 	
 	return SETPOS_OK;
 }

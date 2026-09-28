@@ -26,6 +26,7 @@
 #include <common/utils.hpp>
 
 #include "achievement.hpp"
+#include "aibot.hpp"
 #include "atcommand.hpp"
 #include "battle.hpp"
 #include "battleground.hpp"
@@ -10925,7 +10926,7 @@ void clif_parse_LoadEndAck(int32 fd,map_session_data *sd)
 			map_foreachpc( clif_friendslist_toggle_sub, sd->status.account_id, sd->status.char_id, static_cast<int32>( true ) );
 		}
 
-		if (!sd->state.autotrade) { // Don't trigger NPC event or opening vending/buyingstore will be failed
+		if (!sd->state.autotrade && !sd->state.aibot) { // Don't trigger NPC event or opening vending/buyingstore will be failed
 			npc_script_event( *sd, NPCE_LOGIN );
 		}
 
@@ -11077,7 +11078,7 @@ void clif_parse_LoadEndAck(int32 fd,map_session_data *sd)
 	}
 
 	// Don't trigger NPC event or opening vending/buyingstore will be failed
-	if(!sd->state.autotrade && mapdata->getMapFlag(MF_LOADEVENT)) // Lance
+	if(!sd->state.autotrade && !sd->state.aibot && mapdata->getMapFlag(MF_LOADEVENT)) // Lance
 		npc_script_event( *sd, NPCE_LOADMAP );
 
 	if (pc_checkskill(sd, SG_DEVIL) && ((sd->class_&MAPID_THIRDMASK) == MAPID_STAR_EMPEROR || pc_is_maxjoblv(sd)))
@@ -11471,6 +11472,10 @@ void clif_parse_GlobalMessage(int32 fd, map_session_data* sd)
 
 	// send message to others (using the send buffer for temp. storage)
 	clif_GlobalMessage( *sd, output, sd->chatID ? CHAT_WOS : AREA_CHAT_WOC );
+
+	// let nearby AI bots hear it
+	if( !sd->chatID )
+		aibot_on_public_chat( *sd, message );
 
 	length = strlen(output) + 1;
 
@@ -11920,6 +11925,12 @@ void clif_parse_WisMessage(int32 fd, map_session_data* sd)
 
 	// notify sender of success
 	clif_wis_end( *sd, ACKWHISPER_SUCCESS );
+
+	// AI bots forward whispers to the external brain
+	if (dstsd->state.aibot) {
+		aibot_on_whisper(*dstsd, sd->status.name, message);
+		return;
+	}
 
 	// Normal message
 	clif_wis_message(dstsd, sd->status.name, message, strlen(message)+1, 0);

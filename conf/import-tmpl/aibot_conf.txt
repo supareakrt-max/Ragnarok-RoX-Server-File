@@ -1,0 +1,5 @@
+// AI Bot Bridge local overrides.
+// Settings here override conf/aibot.conf. See that file for descriptions.
+//
+// Example:
+//token: change-me-to-a-long-random-string

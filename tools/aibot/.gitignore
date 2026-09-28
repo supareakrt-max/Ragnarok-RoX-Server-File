@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+config.json
+bots.json
+bots.sql
+stuck_report.csv

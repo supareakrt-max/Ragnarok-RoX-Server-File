@@ -24,6 +24,7 @@
 #include <common/utils.hpp>
 
 #include "achievement.hpp"
+#include "aibot.hpp"
 #include "atcommand.hpp"
 #include "battle.hpp"
 #include "battleground.hpp"
@@ -5059,6 +5060,7 @@ void MapServer::finalize(){
 	do_final_cashshop();
 	do_final_channel(); //should be called after final guild
 	do_final_vending();
+	do_final_aibot();
 	do_final_buyingstore();
 	do_final_path();
 	do_final_emotions();
@@ -5437,6 +5439,9 @@ bool MapServer::initialize( int32 argc, char *argv[] ){
 	do_init_unit();
 	do_init_duel();
 	do_init_vending();
+#ifndef MAP_GENERATOR
+	do_init_aibot();
+#endif
 	do_init_buyingstore();
 	do_init_emotions();
 
