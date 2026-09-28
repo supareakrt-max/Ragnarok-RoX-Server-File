@@ -686,8 +686,8 @@ class BotAgent:
         if remember:
             self.memory.add(speaker, text)
         reply = None
-        if self.brain.llm.enabled:
-            reply = await self.brain.llm.reply(system_prompt(self.name, self.p, self.context_line()), self.memory.as_messages(self.name))
+        if self.brain.llm.allowed(self.name):
+            reply = await self.brain.llm.reply(system_prompt(self.name, self.p, self.context_line()), self.memory.as_messages(self.name), bot_name=self.name)
         if not reply:
             reply = template_reply(self.p, text, self.rng, mentioned=mentioned, busy=self.target is not None)
         return reply

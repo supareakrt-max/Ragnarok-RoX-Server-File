@@ -4,3 +4,4 @@ config.json
 bots.json
 bots.sql
 stuck_report.csv
+llm_usage.json

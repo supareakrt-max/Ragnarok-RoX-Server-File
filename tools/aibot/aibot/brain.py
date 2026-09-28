@@ -34,7 +34,7 @@ class Brain:
         self.clock = Clock(config.get("time_scale", 1.0), config.get("start_hour"))
         self.world = load_world(config.get("world"))
         self.personalities = load_personalities(config.get("personalities"))
-        self.llm = LLMClient(config.get("llm"))
+        self.llm = LLMClient(config.get("llm"), base_dir)
         self.mapcache = MapCache()
         for path in config.get("map_cache", []):
             self.mapcache.load(path if os.path.isabs(path) else os.path.join(base_dir, path))
@@ -226,6 +226,8 @@ class Brain:
                 lat.get("count"), lat.get("avg_ms"), lat.get("p95_ms"),
                 ", ".join("%s=%d" % kv for kv in sorted(self.stats.items())),
             )
+            if self.llm.enabled:
+                log.info("[report] LLM %s | %s", self.llm.stats, self.llm.summary())
             if self.stuck_spots:
                 top = sorted(self.stuck_spots.items(), key=lambda kv: -kv[1])[:5]
                 log.info("[report] stuck hotspots: %s", ", ".join("%s(%d,%d)x%d" % (k[0], k[1], k[2], v) for k, v in top))

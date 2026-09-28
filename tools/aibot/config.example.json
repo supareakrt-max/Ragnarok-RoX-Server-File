@@ -17,13 +17,15 @@
 
   "llm": {
     "enabled": false,
-    "provider": "anthropic",
-    "model": "claude-haiku-4-5-20251001",
-    "api_key_env": "ANTHROPIC_API_KEY",
-    "max_tokens": 80,
-    "timeout": 8,
-    "min_interval": 2.0,
-    "max_concurrency": 4
+    "only_bots": [],
+    "max_tokens": 120,
+    "timeout": 15,
+    "max_concurrency": 2,
+    "usage_file": "llm_usage.json",
+    "providers": [
+      {"provider": "gemini", "model": "gemini-2.5-flash", "daily_limit": 1000, "rpm": 8},
+      {"provider": "groq", "model": "openai/gpt-oss-20b", "daily_limit": 300, "rpm": 20}
+    ]
   },
 
   "personalities": {
