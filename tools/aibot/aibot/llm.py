@@ -99,10 +99,30 @@ class Provider:
 
     def _default_reasoning(self):
         # Gemini thinking eats the output budget and adds latency. 2.5 models can
-        # turn it off; newer ones only go down to "minimal".
+        # turn it off; newer ones go down to "minimal" or "low" depending on the
+        # model (step_down_reasoning() finds the lowest one the model accepts).
         if self.kind == "gemini":
             return "none" if self.model.startswith("gemini-2.5") else "minimal"
         return None
+
+    REASONING_STEPS = ("none", "minimal", "low", "medium")
+
+    def step_down_reasoning(self):
+        """The model refused our thinking level: try the next one. False when out of options."""
+        cur = self.reasoning_effort
+        steps = self.REASONING_STEPS
+        nxt = steps[steps.index(cur) + 1] if cur in steps[:-1] else None
+        if nxt is None:
+            return False
+        log.warning("LLM %s: thinking level %s not supported by %s, using %s", self.name, cur, self.model, nxt)
+        self.reasoning_effort = nxt
+        return True
+
+    def token_budget(self, max_tokens):
+        # on Gemini the thinking tokens come out of the same budget as the answer
+        if self.kind == "gemini" and self.reasoning_effort not in (None, "none"):
+            return max_tokens + 1024
+        return max_tokens
 
     def available(self, usage_today):
         if not self.enabled or self.disabled_reason:
@@ -120,7 +140,7 @@ class Provider:
 
     # -- HTTP -------------------------------------------------------------
     def request(self, system, messages, max_tokens=None):
-        max_tokens = max_tokens or self.max_tokens
+        max_tokens = self.token_budget(max_tokens or self.max_tokens)
         if self.kind == "anthropic":
             url = self.base_url + "/v1/messages"
             body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": messages}
@@ -247,19 +267,27 @@ class LLMClient:
                     continue  # too busy, try the next provider
                 if wait > 0:
                     await asyncio.sleep(wait)
-                provider.last_call = time.monotonic()
-                self.stats["calls"] += 1
-                self._count(provider)
-                try:
-                    text = await asyncio.to_thread(provider.request, system, messages, max_tokens)
-                except urllib.error.HTTPError as exc:
-                    self._handle_http_error(provider, exc)
-                    self.stats["failed"] += 1
-                    continue
-                except Exception as exc:
-                    log.warning("LLM %s request failed: %s", provider.name, exc)
-                    provider.cooldown_until = time.monotonic() + 30
-                    self.stats["failed"] += 1
+                text = None
+                for _attempt in range(len(Provider.REASONING_STEPS)):
+                    provider.last_call = time.monotonic()
+                    self.stats["calls"] += 1
+                    self._count(provider)
+                    try:
+                        text = await asyncio.to_thread(provider.request, system, messages, max_tokens)
+                    except urllib.error.HTTPError as exc:
+                        self.stats["failed"] += 1
+                        if self._handle_http_error(provider, exc):
+                            continue  # retry right away with the adjusted settings
+                        text = None
+                    except Exception as exc:
+                        log.warning("LLM %s request failed: %s", provider.name, exc)
+                        provider.cooldown_until = time.monotonic() + 30
+                        self.stats["failed"] += 1
+                        text = None
+                    else:
+                        break
+                    break
+                if provider.cooldown_until > time.monotonic() or provider.disabled_reason or text is None:
                     continue
                 provider.consecutive_429 = 0
                 text = (text or "").strip() if raw else clean_reply(text)
@@ -270,6 +298,7 @@ class LLMClient:
             return None
 
     def _handle_http_error(self, provider, exc):
+        """Returns True when the request should be retried now (settings adjusted)."""
         try:
             detail = exc.read().decode("utf-8", "replace")[:300]
         except Exception:
@@ -283,6 +312,9 @@ class LLMClient:
         elif exc.code in (401, 403):
             provider.disabled_reason = "HTTP %d (check the API key): %s" % (exc.code, detail)
             log.error("LLM %s disabled: %s", provider.name, provider.disabled_reason)
+        elif exc.code == 400 and ("thinking" in detail.lower() or "reasoning" in detail.lower()) \
+                and provider.step_down_reasoning():
+            return True
         elif exc.code in (400, 404):
             provider.cooldown_until = time.monotonic() + 600
             log.error("LLM %s rejected the request (HTTP %d, wrong model name?): %s", provider.name, exc.code, detail)
