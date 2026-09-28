@@ -1,5 +1,5 @@
 //===== rAthena Script =======================================
-//= Ro-X Player AI - เมนู @ai (ขั้นที่ 1-4)
+//= Ro-X Player AI - เมนู @ai (ขั้นที่ 1-5)
 //===== คำอธิบาย ============================================
 //= - @ai        เปิดหน้าต่างตั้งค่า AI
 //= - @ai on     เปิด AI ทันที
@@ -10,6 +10,9 @@
 //=   AI_RANGE AI_NOBOSS AI_SKILL[] AI_SKSP AI_BUFF[] AI_HPPCT AI_HPITEM AI_SPPCT AI_SPITEM
 //=   AI_LOOT AI_LOOTID[] AI_RT_HP AI_RT_POT AI_RT_WEIGHT AI_FLYWING
 //=   ต่อแมพ: AI_MM_<แมพ> (โหมดเลือกมอน), AI_ML_<แมพ>$ (รายการมอนที่ติ๊ก)
+//=   ซัพพอร์ต: AI_ROLE AI_LEADER AI_LEADERN$ AI_FOLLOW AI_HEALSK[0] AI_HEALPCT AI_PBUFF[] AI_RES
+//= - เวลาใช้งาน AI: #AI_TIME (วินาที, ต่อไอดี) นับถอยหลังเฉพาะตอน AI ทำงาน
+//=   ซื้อ 4 ชม. = 1,000,000 Zeny หรือ 2 Cash Point (แก้ราคาได้ที่ OnInit)
 //= - ไฟล์นี้บันทึกเป็น TIS-620
 //============================================================
 
@@ -19,6 +22,13 @@ OnInit:
 	.n$ = "[ ระบบ AI ]";
 	setarray .mode$[0], "ตีทุกตัว", "ตีเฉพาะที่ติ๊ก", "ตีทุกตัว ยกเว้นที่ติ๊ก";
 	setarray .loot$[0], "ไม่เก็บ", "เก็บทุกชิ้น", "เก็บเฉพาะที่เลือก";
+	setarray .role$[0], "ฟาร์มมอน", "ซัพพอร์ตเดินตาม";
+	// ----- ราคาเวลาใช้งาน AI -----
+	.buy_hours = 4;			// ซื้อครั้งละกี่ชั่วโมง
+	.buy_zeny = 1000000;		// ราคา Zeny
+	.buy_cash = 2;			// ราคา Cash Point (#CASHPOINTS)
+	.max_hours = 720;		// เก็บเวลาสะสมได้สูงสุด (ชม.)
+	.gm_level = 99;			// GM เลเวลนี้ขึ้นไป เติมเวลาฟรีได้
 	end;
 
 OnAtcmd:
@@ -35,9 +45,13 @@ OnAtcmd:
 L_Main:
 	clear;
 	mes .n$;
-	mes "สถานะ: " + (ai_status() ? "^00AA00เปิดอยู่^000000" : "^FF0000ปิดอยู่^000000");
-	mes "แมพ " + strcharinfo(3) + ": ^0055FF" + .mode$[getd("AI_MM_" + strcharinfo(3))] + "^000000";
-	switch (select((ai_status() ? "ปิด AI" : "เปิด AI") + ":การโจมตี / เลือกมอน:สกิลโจมตี:บัฟตัวเอง:ยา HP / SP:เก็บของ:กลับเมือง / ปีกแมลงวัน:ปิดหน้าต่าง")) {
+	mes "สถานะ: " + (ai_status() ? "^00AA00เปิดอยู่^000000" : "^FF0000ปิดอยู่^000000") + "   โหมด: ^0055FF" + .role$[AI_ROLE] + "^000000";
+	mes "เวลา AI เหลือ: ^0055FF" + callsub(S_TimeStr, #AI_TIME) + "^000000";
+	if (AI_ROLE == 1)
+		mes "ตาม: ^0055FF" + (AI_LEADER ? AI_LEADERN$ : "- ยังไม่เลือก -") + "^000000";
+	else
+		mes "แมพ " + strcharinfo(3) + ": ^0055FF" + .mode$[getd("AI_MM_" + strcharinfo(3))] + "^000000";
+	switch (select((ai_status() ? "ปิด AI" : "เปิด AI") + ":ซื้อเวลา AI:เปลี่ยนโหมด (ฟาร์ม / ซัพพอร์ต):การโจมตี / เลือกมอน:สกิลโจมตี:ตั้งค่าซัพพอร์ต (ตาม / ฮีล / บัฟปาร์ตี้):บัฟตัวเอง:ยา HP / SP:เก็บของ:กลับเมือง / ปีกแมลงวัน:ปิดหน้าต่าง")) {
 	case 1:
 		clear;
 		mes .n$;
@@ -48,31 +62,173 @@ L_Main:
 		}
 		callsub S_On, 1;
 		close;
-	case 2: callsub S_Attack; break;
-	case 3: callsub S_Skill; break;
-	case 4: callsub S_Buff; break;
-	case 5: callsub S_Potion; break;
-	case 6: callsub S_Loot; break;
-	case 7: callsub S_Home; break;
+	case 2: callsub S_Buy; break;
+	case 3:
+		AI_ROLE = !AI_ROLE;
+		if (ai_status()) {
+			clear;
+			mes .n$;
+			mes "เปลี่ยนเป็นโหมด ^0055FF" + .role$[AI_ROLE] + "^000000 แล้ว";
+			mes "(มีผลทันที)";
+			next;
+		}
+		break;
+	case 4: callsub S_Attack; break;
+	case 5: callsub S_Skill; break;
+	case 6: callsub S_Support; break;
+	case 7: callsub S_Buff; break;
+	case 8: callsub S_Potion; break;
+	case 9: callsub S_Loot; break;
+	case 10: callsub S_Home; break;
 	default: close;
 	}
 	goto L_Main;
 
 // ---------------------------------------------------------------
+// getarg(0) = วินาที -> "X ชม. Y นาที"
+S_TimeStr:
+	.@t = getarg(0);
+	if (.@t <= 0)
+		return "หมดแล้ว";
+	return (.@t / 3600) + " ชม. " + ((.@t % 3600) / 60) + " นาที";
+
+// ---------------------------------------------------------------
+S_Buy:
+	clear;
+	mes .n$;
+	mes "เวลา AI เหลือ: ^0055FF" + callsub(S_TimeStr, #AI_TIME) + "^000000";
+	mes "(ใช้ได้ทุกตัวละครในไอดี นับเฉพาะตอน AI ทำงาน)";
+	mes "ซื้อ " + .buy_hours + " ชม.:";
+	mes "- " + callfunc("F_InsertComma", .buy_zeny) + " Zeny  (มี " + callfunc("F_InsertComma", Zeny) + ")";
+	mes "- " + .buy_cash + " Cash Point  (มี " + #CASHPOINTS + ")";
+	.@menu$ = "จ่าย " + callfunc("F_InsertComma", .buy_zeny) + " Zeny:จ่าย " + .buy_cash + " Cash Point:" + (getgmlevel() >= .gm_level ? "[GM] เติมฟรี 24 ชม." : "") + ":กลับ";
+	.@s = select(.@menu$);
+	if (.@s == 4)
+		return;
+	.@add = (.@s == 3 ? 24 : .buy_hours) * 3600;
+	if (#AI_TIME + .@add > .max_hours * 3600) {
+		clear;
+		mes .n$;
+		mes "เก็บเวลาสะสมได้ไม่เกิน " + .max_hours + " ชม.";
+		next;
+		return;
+	}
+	clear;
+	mes .n$;
+	if (.@s == 1) {
+		if (Zeny < .buy_zeny) {
+			mes "Zeny ไม่พอ";
+			next;
+			return;
+		}
+		Zeny -= .buy_zeny;
+	} else if (.@s == 2) {
+		if (#CASHPOINTS < .buy_cash) {
+			mes "Cash Point ไม่พอ";
+			next;
+			return;
+		}
+		#CASHPOINTS -= .buy_cash;
+	}
+	#AI_TIME += .@add;
+	logmes "AI time +" + (.@add / 3600) + "h (" + (.@s == 1 ? "zeny" : (.@s == 2 ? "cash" : "gm")) + ")";
+	mes "เพิ่มเวลา AI แล้ว";
+	mes "เหลือ: ^0055FF" + callsub(S_TimeStr, #AI_TIME) + "^000000";
+	next;
+	return;
+
+// ---------------------------------------------------------------
+S_Support:
+	while (1) {
+		clear;
+		mes .n$;
+		mes "ตาม: ^0055FF" + (AI_LEADER ? AI_LEADERN$ : "- ยังไม่เลือก -") + "^000000  ระยะ " + (AI_FOLLOW ? AI_FOLLOW : 3) + " ช่อง";
+		mes "ฮีล: " + (AI_HEALSK[0] ? ai_skillname(AI_HEALSK[0]) + " เมื่อ HP < " + (AI_HEALPCT ? AI_HEALPCT : 70) + "%" : "ไม่ฮีล");
+		mes "ชุบชีวิต: " + (AI_RES ? "เปิด" : "ปิด");
+		mes "บัฟปาร์ตี้:";
+		callsub S_ShowSkills, "AI_PBUFF", 6;
+		switch (select("เลือกคนที่จะตาม (ในปาร์ตี้):ตั้งระยะตาม:เลือกสกิลฮีล:ตั้ง % HP ที่จะฮีล:เพิ่มบัฟปาร์ตี้:ลบบัฟปาร์ตี้:" + (AI_RES ? "ปิด" : "เปิด") + " ชุบชีวิต:กลับ")) {
+		case 1:
+			if (!getcharid(1)) {
+				clear;
+				mes .n$;
+				mes "ต้องอยู่ในปาร์ตี้ก่อน";
+				next;
+				break;
+			}
+			getpartymember getcharid(1), 0;
+			getpartymember getcharid(1), 1;
+			.@c = 0;
+			.@menu$ = "";
+			for (.@i = 0; .@i < $@partymembercount; .@i++) {
+				if ($@partymembercid[.@i] == getcharid(0))
+					continue;
+				.@cids[.@c] = $@partymembercid[.@i];
+				.@names$[.@c] = $@partymembername$[.@i];
+				.@c++;
+				.@menu$ += $@partymembername$[.@i] + ":";
+			}
+			clear;
+			mes .n$;
+			if (.@c == 0) {
+				mes "ไม่มีสมาชิกคนอื่นในปาร์ตี้";
+				next;
+				break;
+			}
+			mes "เลือกคนที่จะเดินตาม";
+			.@s = select(.@menu$ + "ยกเลิก") - 1;
+			if (.@s < .@c) {
+				AI_LEADER = .@cids[.@s];
+				AI_LEADERN$ = .@names$[.@s];
+			}
+			break;
+		case 2:
+			clear;
+			mes .n$;
+			mes "เดินตามห่างกี่ช่อง (1-10)";
+			if (input(.@v, 1, 10) == 0)
+				AI_FOLLOW = .@v;
+			break;
+		case 3:
+			AI_HEALSK[0] = 0;
+			callsub S_PickSkill, 3, "AI_HEALSK", 1;
+			break;
+		case 4:
+			clear;
+			mes .n$;
+			mes "ฮีลเมื่อ HP ต่ำกว่ากี่ % (1-99)";
+			if (input(.@v, 1, 99) == 0)
+				AI_HEALPCT = .@v;
+			break;
+		case 5: callsub S_PickSkill, 4, "AI_PBUFF", 6; break;
+		case 6: callsub S_RemoveSkill, "AI_PBUFF", 6; break;
+		case 7: AI_RES = !AI_RES; break;
+		default: return;
+		}
+	}
+
+// ---------------------------------------------------------------
 // เปิด AI  getarg(0): 1 = อยู่ในหน้าต่าง (mes), 0 = จากคำสั่ง (dispbottom)
 S_On:
-	.@r = ai_on();
+	if (AI_ROLE == 1 && !AI_LEADER)
+		.@r = -5;
+	else
+		.@r = ai_on();
 	switch (.@r) {
 	case 1:  .@m$ = "[AI] เปิด AI แล้ว"; break;
 	case -1: .@m$ = "[AI] ใช้ AI ในเมืองไม่ได้"; break;
 	case -2: .@m$ = "[AI] ตัวละครเสียชีวิตอยู่"; break;
 	case -3: .@m$ = "[AI] น้ำหนักเกิน 90% ใช้ AI ไม่ได้"; break;
+	case -4: .@m$ = "[AI] ไม่มีเวลา AI เหลือ - ซื้อได้ที่ @ai > ซื้อเวลา AI"; break;
+	case -5: .@m$ = "[AI] โหมดซัพพอร์ต: เลือกคนที่จะตามก่อน (@ai > ตั้งค่าซัพพอร์ต)"; break;
 	default: .@m$ = "[AI] เปิด AI ไม่สำเร็จ"; break;
 	}
 	if (getarg(0)) {
 		mes .@m$;
-		if (.@r == 1)
+		if (.@r == 1) {
+			mes "เวลา AI เหลือ: " + callsub(S_TimeStr, #AI_TIME);
 			mes "ปิดหน้าต่างนี้เพื่อเริ่มทำงาน";
+		}
 	} else
 		dispbottom .@m$;
 	return;
@@ -170,8 +326,8 @@ S_Skill:
 		mes "ใช้สกิลเมื่อ SP >= ^0055FF" + AI_SKSP + "%^000000";
 		mes "(สกิลใช้ไม่ได้ / SP ไม่พอ = ตีธรรมดา)";
 		switch (select("เพิ่มสกิล:ลบสกิล:ตั้ง SP ขั้นต่ำ:กลับ")) {
-		case 1: callsub S_PickSkill, 1; break;
-		case 2: callsub S_RemoveSkill, 1; break;
+		case 1: callsub S_PickSkill, 1, "AI_SKILL", 5; break;
+		case 2: callsub S_RemoveSkill, "AI_SKILL", 5; break;
 		case 3:
 			clear;
 			mes .n$;
@@ -191,8 +347,8 @@ S_Buff:
 		mes "บัฟตัวเอง (ร่ายใหม่เมื่อหมด):";
 		callsub S_ShowSkills, "AI_BUFF", 6;
 		switch (select("เพิ่มบัฟ:ลบบัฟ:กลับ")) {
-		case 1: callsub S_PickSkill, 2; break;
-		case 2: callsub S_RemoveSkill, 2; break;
+		case 1: callsub S_PickSkill, 2, "AI_BUFF", 6; break;
+		case 2: callsub S_RemoveSkill, "AI_BUFF", 6; break;
 		default: return;
 		}
 	}
@@ -211,11 +367,11 @@ S_ShowSkills:
 		mes "- ยังไม่ได้เลือก";
 	return;
 
-// getarg(0): 1 = สกิลโจมตี (AI_SKILL, 5 ช่อง), 2 = บัฟ (AI_BUFF, 6 ช่อง)
+// getarg(0) = ชนิด (1 โจมตี, 2 บัฟตัวเอง, 3 ฮีล, 4 บัฟปาร์ตี้), getarg(1) = ชื่อตัวแปร, getarg(2) = จำนวนช่อง
 S_PickSkill:
 	.@type = getarg(0);
-	.@var$ = (.@type == 1 ? "AI_SKILL" : "AI_BUFF");
-	.@max = (.@type == 1 ? 5 : 6);
+	.@var$ = getarg(1);
+	.@max = getarg(2);
 	for (.@slot = 0; .@slot < .@max; .@slot++)
 		if (!getd(.@var$ + "[" + .@slot + "]"))
 			break;
@@ -231,7 +387,10 @@ S_PickSkill:
 	.@menu$ = "";
 	for (.@i = 0; .@i < @skilllist_count; .@i++) {
 		.@id = @skilllist_id[.@i];
-		if (@skilllist_lv[.@i] < 1 || ai_skilltype(.@id) != .@type)
+		if (@skilllist_lv[.@i] < 1)
+			continue;
+		.@t = ai_skilltype(.@id);
+		if (.@t != .@type && !(.@type == 2 && .@t == 4))	// บัฟตัวเองเลือกบัฟที่ใส่คนอื่นได้ด้วย
 			continue;
 		for (.@j = 0; .@j < .@max; .@j++)
 			if (getd(.@var$ + "[" + .@j + "]") == .@id)
@@ -253,9 +412,10 @@ S_PickSkill:
 		setd .@var$ + "[" + .@slot + "]", .@ids[.@s];
 	return;
 
+// getarg(0) = ชื่อตัวแปร, getarg(1) = จำนวนช่อง
 S_RemoveSkill:
-	.@var$ = (getarg(0) == 1 ? "AI_SKILL" : "AI_BUFF");
-	.@max = (getarg(0) == 1 ? 5 : 6);
+	.@var$ = getarg(0);
+	.@max = getarg(1);
 	.@c = 0;
 	.@menu$ = "";
 	for (.@i = 0; .@i < .@max; .@i++) {

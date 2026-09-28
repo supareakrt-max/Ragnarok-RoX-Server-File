@@ -1,13 +1,15 @@
-// Ro-X Player AI (phases 1-4)
+// Ro-X Player AI (phases 1-5)
 // Included from src/custom/script.inc (compiled inside src/map/script.cpp).
 //
 // Script commands:
-//   ai_on {<char id>};        -> 1 = running, -1 = in town, -2 = dead, -3 = overweight (90%)
+//   ai_on {<char id>};        -> 1 = running, -1 = in town, -2 = dead, -3 = overweight (90%), -4 = no AI time
 //   ai_off {<char id>};       -> 1 = stopped, 0 = was not running
 //   ai_status({<char id>})    -> 1 = running, 0 = off
 //   ai_maplist({<char id>})   -> number of monster kinds alive on the player's map, fills
 //                                @ai_mob_id[], @ai_mob_cnt[], @ai_mob_boss[] (0 normal, 1 boss, 2 MVP)
-//   ai_skilltype(<skill id>)  -> 1 = attack skill (target / ground), 2 = self buff, 0 = not usable by the AI
+//   ai_skilltype(<skill id>)  -> 1 = attack skill (target / ground), 2 = self-only buff,
+//                                3 = support skill without status (Heal ...), 4 = buff castable on others,
+//                                0 = not usable by the AI
 //   ai_skillname(<skill id>)  -> skill name (e.g. "Bash")
 //
 // Settings = permanent character variables (set by npc/ai_menu.txt):
@@ -20,11 +22,17 @@
 //   AI_RT_POT      go home when potions run out: 1 = HP potion, 2 = SP potion, 3 = both
 //   AI_RT_WEIGHT   go home when weight% >= this (0 = off)
 //   AI_FLYWING     use Fly Wing when no monster was found for this many seconds (0 = off)
+//   AI_ROLE        0 = farm, 1 = support (follow a party member, heal and buff the party)
+//   AI_LEADER      char id to follow (support)          AI_FOLLOW    follow distance 1-10 (default 3)
+//   AI_HEALSK[0]   heal skill (support)                 AI_HEALPCT   heal members below this HP% (default 70)
+//   AI_PBUFF[0-5]  party buffs, cast on members that miss them
+//   AI_RES         1 = resurrect dead party members (needs Resurrection)
+//   #AI_TIME       account variable: AI time left in seconds, counted down while the AI runs
 //   AI_MM_<map>    per-map monster mode: 0 = attack all, 1 = only listed, 2 = all except listed
 //   AI_ML_<map>$   per-map monster list, e.g. ",1002,1063,"
 //
-// The AI stops by itself on death, map change, town map, weight >= 90%, logout
-// or after it used a Butterfly Wing to go home.
+// The AI stops by itself on death, map change, town map (farm mode), weight >= 90%, logout,
+// no AI time left, leader gone for 60 s (support mode) or after it used a Butterfly Wing to go home.
 
 #include <unordered_map>
 #include <unordered_set>
@@ -38,6 +46,7 @@ static const int32 AI_PLAYER_LOOT_TIMEOUT = 6000;    // give up an item we could
 static const int32 AI_PLAYER_MAX_SKILL = 5;
 static const int32 AI_PLAYER_MAX_BUFF = 6;
 static const int32 AI_PLAYER_MAX_LOOT = 20;
+static const int32 AI_PLAYER_MAX_PBUFF = 6;
 static const t_itemid AI_PLAYER_FLY_WING = 601;
 static const t_itemid AI_PLAYER_BUTTERFLY_WING = 602;
 
@@ -52,6 +61,10 @@ struct s_ai_player {
 	std::vector<int32> loot_ignore;     // floor items we failed to pick up
 	std::vector<int32> mob_ignore;      // monsters we could not reach / hurt
 	t_tick ignore_reset;       // when the ignore lists are cleared
+	t_tick last_tick;          // AI time accounting
+	int32 time_ms;             // used AI time not yet taken from #AI_TIME
+	bool time_warned;          // "10 minutes left" was shown
+	t_tick leader_lost;        // support: since when the leader is not on this map (0 = here)
 	int64 reg_mode;            // AI_MM_<map>
 	int64 reg_list;            // AI_ML_<map>$
 	std::string list_raw;      // cached AI_ML_<map>$ value
@@ -69,6 +82,8 @@ enum e_ai_player_stop : int32 {
 	AI_PLAYER_HOME_SPPOT,
 	AI_PLAYER_HOME_WEIGHT,
 	AI_PLAYER_STOP_NOWING,
+	AI_PLAYER_STOP_TIME,
+	AI_PLAYER_STOP_LEADER,
 };
 
 static std::unordered_map<uint32, s_ai_player> ai_player_list; // key: char_id
@@ -78,6 +93,7 @@ static int32 ai_player_timer_id = INVALID_TIMER;
 struct s_ai_player_regs {
 	int64 range, noboss, skill, sksp, buff, hppct, hpitem, sppct, spitem;
 	int64 loot, lootid, rt_hp, rt_pot, rt_weight, flywing;
+	int64 role, leader, follow, healsk, healpct, pbuff, res, time;
 
 	s_ai_player_regs() {
 		range = add_str("AI_RANGE");     noboss = add_str("AI_NOBOSS");
@@ -89,6 +105,10 @@ struct s_ai_player_regs {
 		rt_hp = add_str("AI_RT_HP");     rt_pot = add_str("AI_RT_POT");
 		rt_weight = add_str("AI_RT_WEIGHT");
 		flywing = add_str("AI_FLYWING");
+		role = add_str("AI_ROLE");       leader = add_str("AI_LEADER");
+		follow = add_str("AI_FOLLOW");   healsk = add_str("AI_HEALSK");
+		healpct = add_str("AI_HEALPCT"); pbuff = add_str("AI_PBUFF");
+		res = add_str("AI_RES");         time = add_str("#AI_TIME");
 	}
 };
 
@@ -112,6 +132,8 @@ static const char* ai_player_stop_message(e_ai_player_stop reason) {
 		case AI_PLAYER_HOME_SPPOT:  return "[AI] \302\322 SP \313\301\264 - \241\305\321\272\340\301\327\315\247\341\305\351\307";
 		case AI_PLAYER_HOME_WEIGHT: return "[AI] \242\315\247\340\265\347\301 - \241\305\321\272\340\301\327\315\247\341\305\351\307";
 		case AI_PLAYER_STOP_NOWING: return "[AI] \313\302\330\264\267\323\247\322\271: \265\351\315\247\241\305\321\272\340\301\327\315\247\341\265\350\344\301\350\301\325 Butterfly Wing \313\303\327\315\341\301\276\271\325\351\313\351\322\301\343\252\351";
+		case AI_PLAYER_STOP_TIME:   return "[AI] \313\301\264\340\307\305\322\343\252\351\247\322\271 AI - \253\327\351\315\340\307\305\322\340\276\324\350\301\344\264\351\267\325\350 @ai";
+		case AI_PLAYER_STOP_LEADER: return "[AI] \313\302\330\264\267\323\247\322\271: \244\271\267\325\350\265\322\301\344\301\350\315\302\331\350\343\271\341\301\276\271\325\351\340\241\324\271 60 \307\324\271\322\267\325";
 		default:                    return nullptr;
 	}
 }
@@ -119,7 +141,7 @@ static const char* ai_player_stop_message(e_ai_player_stop reason) {
 static e_ai_player_stop ai_player_check(map_session_data* sd) {
 	if (pc_isdead(sd))
 		return AI_PLAYER_STOP_DEAD;
-	if (map_getmapflag(sd->m, MF_TOWN))
+	if (map_getmapflag(sd->m, MF_TOWN) && ai_player_get(sd, ai_player_reg().role) == 0) // support may follow in town
 		return AI_PLAYER_STOP_TOWN;
 	if (sd->max_weight > 0 && (uint64)sd->weight * 100 >= (uint64)sd->max_weight * 90)
 		return AI_PLAYER_STOP_WEIGHT;
@@ -443,6 +465,118 @@ static void ai_player_ignore_target(map_session_data* sd, s_ai_player& ai) {
 	unit_stop_attack(sd);
 }
 
+/// Cast a skill on a player (walks into range first). Returns true while busy with it.
+static bool ai_player_cast_on(map_session_data* sd, map_session_data* target, uint16 skill_id) {
+	uint16 skill_lv = pc_checkskill(sd, skill_id);
+	if (!ai_player_skill_ready(sd, skill_id, skill_lv))
+		return false;
+	if (target != sd) {
+		switch (ai_player_approach(sd, target, skill_get_range2(sd, skill_id, skill_lv, true), false)) {
+			case AI_PLAYER_WALKING: return true;
+			case AI_PLAYER_UNREACHABLE: return false;
+			default: break;
+		}
+	}
+	return unit_skilluse_id(sd, target->id, skill_id, skill_lv) != 0;
+}
+
+/// Support mode: follow the leader, resurrect / heal / buff party members.
+static e_ai_player_stop ai_player_support(map_session_data* sd, s_ai_player& ai, t_tick tick) {
+	const s_ai_player_regs& reg = ai_player_reg();
+
+	uint32 leader_id = (uint32)ai_player_get(sd, reg.leader);
+	map_session_data* lsd = leader_id != 0 ? map_charid2sd(leader_id) : nullptr;
+	if (lsd == sd || (lsd != nullptr && lsd->m != sd->m))
+		lsd = nullptr;
+	if (lsd == nullptr) {
+		if (ai.leader_lost == 0)
+			ai.leader_lost = tick;
+		else if (DIFF_TICK(tick, ai.leader_lost) > 60000)
+			return AI_PLAYER_STOP_LEADER;
+	} else
+		ai.leader_lost = 0;
+
+	// Players to look after: leader first, then party members on this map, then ourselves
+	std::vector<map_session_data*> members;
+	if (lsd != nullptr)
+		members.push_back(lsd);
+	party_data* p = sd->status.party_id != 0 ? party_search(sd->status.party_id) : nullptr;
+	if (p != nullptr) {
+		for (int32 i = 0; i < MAX_PARTY; i++) {
+			map_session_data* msd = p->data[i].sd;
+			if (msd == nullptr || msd == sd || msd == lsd || msd->m != sd->m || !check_distance_bl(sd, msd, AREA_SIZE))
+				continue;
+			members.push_back(msd);
+		}
+	}
+	members.push_back(sd);
+
+	// Resurrect
+	if (ai_player_get(sd, reg.res) != 0 && pc_checkskill(sd, ALL_RESURRECTION) > 0) {
+		for (map_session_data* msd : members) {
+			if (msd != sd && pc_isdead(msd) && ai_player_cast_on(sd, msd, ALL_RESURRECTION))
+				return AI_PLAYER_OK;
+		}
+	}
+
+	// Heal the member with the lowest HP%
+	uint16 heal_id = (uint16)ai_player_get(sd, reg.healsk);
+	if (heal_id != 0 && pc_checkskill(sd, heal_id) > 0) {
+		int32 heal_pct = (int32)ai_player_get(sd, reg.healpct);
+		if (heal_pct <= 0)
+			heal_pct = 70;
+		map_session_data* worst = nullptr;
+		int32 worst_pct = heal_pct;
+		for (map_session_data* msd : members) {
+			if (pc_isdead(msd))
+				continue;
+			int32 pct = ai_player_percent(msd->battle_status.hp, msd->battle_status.max_hp);
+			if (pct < worst_pct) {
+				worst = msd;
+				worst_pct = pct;
+			}
+		}
+		if (worst != nullptr && ai_player_cast_on(sd, worst, heal_id))
+			return AI_PLAYER_OK;
+	}
+
+	// Party buffs
+	for (map_session_data* msd : members) {
+		if (pc_isdead(msd))
+			continue;
+		for (int32 i = 0; i < AI_PLAYER_MAX_PBUFF; i++) {
+			uint16 skill_id = (uint16)ai_player_get(sd, reg.pbuff, i);
+			if (skill_id == 0)
+				continue;
+			sc_type sc = skill_get_sc(skill_id);
+			if (sc <= SC_NONE || msd->sc.getSCE(sc) != nullptr)
+				continue;
+			if (ai_player_cast_on(sd, msd, skill_id))
+				return AI_PLAYER_OK;
+		}
+	}
+
+	// Follow the leader
+	if (lsd != nullptr) {
+		int32 dist = (int32)ai_player_get(sd, reg.follow);
+		dist = dist > 0 ? cap_value(dist, 1, 10) : 3;
+		if (!check_distance_bl(sd, lsd, dist) && (!unit_is_walking(sd) || sd->ud.target_to != lsd->id)) {
+			if (!unit_walktobl(sd, lsd, dist, 0) && !unit_is_walking(sd)) {
+				// Too far for one walk: head towards the leader in steps
+				int32 dx = lsd->x - sd->x, dy = lsd->y - sd->y;
+				int32 len = std::max(abs(dx), abs(dy));
+				for (int32 step = 12; step >= 4 && len > 0; step -= 4) {
+					int16 x = (int16)(sd->x + dx * std::min(step, len) / len);
+					int16 y = (int16)(sd->y + dy * std::min(step, len) / len);
+					if (map_getcell(sd->m, x, y, CELL_CHKPASS) && ai_player_can_walk(sd, x, y) && unit_walktoxy(sd, x, y, 0))
+						break;
+				}
+			}
+		}
+	}
+	return AI_PLAYER_OK;
+}
+
 static e_ai_player_stop ai_player_think(map_session_data* sd, s_ai_player& ai, t_tick tick) {
 	const s_ai_player_regs& reg = ai_player_reg();
 
@@ -480,6 +614,9 @@ static e_ai_player_stop ai_player_think(map_session_data* sd, s_ai_player& ai, t
 	// Self buffs
 	if (ai_player_do_buff(sd))
 		return AI_PLAYER_OK;
+
+	if (ai_player_get(sd, reg.role) == 1)
+		return ai_player_support(sd, ai, tick);
 
 	bool noboss = ai_player_get(sd, reg.noboss) != 0;
 	int32 range = ai_player_range(sd);
@@ -562,6 +699,27 @@ static e_ai_player_stop ai_player_think(map_session_data* sd, s_ai_player& ai, t
 	return AI_PLAYER_OK;
 }
 
+/// Take the time the AI ran from #AI_TIME. Returns false when no time is left.
+static bool ai_player_use_time(map_session_data* sd, s_ai_player& ai, t_tick tick) {
+	const s_ai_player_regs& reg = ai_player_reg();
+	ai.time_ms += (int32)DIFF_TICK(tick, ai.last_tick);
+	ai.last_tick = tick;
+	if (ai.time_ms < 1000)
+		return true;
+	int64 left = pc_readaccountreg(sd, reg.time) - ai.time_ms / 1000;
+	ai.time_ms %= 1000;
+	if (left < 0)
+		left = 0;
+	pc_setaccountreg(sd, reg.time, left);
+	if (left <= 0)
+		return false;
+	if (left <= 600 && !ai.time_warned) {
+		ai.time_warned = true;
+		clif_displaymessage(sd->fd, "[AI] \340\307\305\322\343\252\351\247\322\271 AI \340\313\305\327\315\344\301\350\266\326\247 10 \271\322\267\325");
+	}
+	return true;
+}
+
 static TIMER_FUNC(ai_player_timer) {
 	for (auto it = ai_player_list.begin(); it != ai_player_list.end(); ) {
 		map_session_data* sd = map_charid2sd(it->first);
@@ -569,7 +727,9 @@ static TIMER_FUNC(ai_player_timer) {
 			it = ai_player_list.erase(it);
 			continue;
 		}
-		e_ai_player_stop reason = ai_player_think(sd, it->second, tick);
+		e_ai_player_stop reason = AI_PLAYER_STOP_TIME;
+		if (ai_player_use_time(sd, it->second, tick))
+			reason = ai_player_think(sd, it->second, tick);
 		if (reason != AI_PLAYER_OK) {
 			unit_stop_attack(sd);
 			const char* msg = ai_player_stop_message(reason);
@@ -604,6 +764,10 @@ BUILDIN_FUNC(ai_on) {
 		case AI_PLAYER_STOP_WEIGHT: script_pushint(st, -3); return SCRIPT_CMD_SUCCESS;
 		default: break;
 	}
+	if (pc_readaccountreg(sd, ai_player_reg().time) <= 0) {
+		script_pushint(st, -4); // no AI time left
+		return SCRIPT_CMD_SUCCESS;
+	}
 	t_tick tick = gettick();
 	s_ai_player& ai = ai_player_list[sd->status.char_id];
 	ai.m = sd->m;
@@ -616,6 +780,10 @@ BUILDIN_FUNC(ai_on) {
 	ai.loot_ignore.clear();
 	ai.mob_ignore.clear();
 	ai.ignore_reset = tick + 60000;
+	ai.last_tick = tick;
+	ai.time_ms = 0;
+	ai.time_warned = false;
+	ai.leader_lost = 0;
 	std::string mapname = map_getmapdata(sd->m)->name;
 	ai.reg_mode = add_str(("AI_MM_" + mapname).c_str());
 	ai.reg_list = add_str(("AI_ML_" + mapname + "$").c_str());
@@ -710,9 +878,12 @@ BUILDIN_FUNC(ai_skilltype) {
 		return SCRIPT_CMD_SUCCESS;
 	}
 	int32 inf = skill_get_inf(skill_id);
+	bool has_sc = skill_get_sc(skill_id) > SC_NONE;
 	if (inf & (INF_ATTACK_SKILL | INF_GROUND_SKILL))
 		script_pushint(st, 1);
-	else if ((inf & (INF_SELF_SKILL | INF_SUPPORT_SKILL)) && skill_get_sc(skill_id) > SC_NONE)
+	else if (inf & INF_SUPPORT_SKILL)
+		script_pushint(st, has_sc ? 4 : 3);
+	else if ((inf & INF_SELF_SKILL) && has_sc)
 		script_pushint(st, 2);
 	else
 		script_pushint(st, 0);
