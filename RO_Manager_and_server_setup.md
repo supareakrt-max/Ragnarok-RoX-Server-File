@@ -18,7 +18,7 @@
 - เช็กเลเวล/เพศ/อาชีพ (pc_charm_usable), recalc ตอน additem/delitem, และ recalc เมื่อสถานะ VIP เปลี่ยน (chrif_parse_ack_vipActive)
 - ไฟล์ที่แก้: common/mmo.hpp, map/script_constants.hpp, map/itemdb.cpp/.hpp, map/clif.cpp, map/status.cpp, map/pc.cpp/.hpp, map/battle.cpp/.hpp, map/chrif.cpp
 - ไอเท็ม (db/import/item_db.yml, 84 รายการ): 60000–60002 HotWeek Charm 01–03 (ไม่มีสาย) + Charm สเตตัส 8 สาย × +1..+10 = ID 60100–60179 (Str 60100-09, Agi 60110-19, Vit 60120-29, Int 60130-39, Luk 60140-49, MaxHP% 60150-59, MaxSP% 60160-69, DropRate% 60170-79, Trade NoDrop) + 60200 Charm VIP
-- `npc/Npc RoX/charm_system.txt`: ดรอป 0.05% ต่อการฆ่า สุ่ม 1 สาย ระดับ +1 เข้ากระเป๋าทันที (OnNPCKillEvent) + NPC อัพเกรด (ดูหัวข้อ Charm Upgrade) + ร้าน Forge Scroll
+- `npc/Npc RoX/charm_system.txt`: ดรอป 0.20% ต่อการฆ่า (`.rate = 20` ต่อ 10000; เดิม 0.05%, เปลี่ยน 2026-09-28) สุ่ม 1 สาย ระดับ +1 เข้ากระเป๋าทันที (OnNPCKillEvent) + NPC อัพเกรด (ดูหัวข้อ Charm Upgrade) + ร้าน Forge Scroll
 - Charm VIP (60200): ALL Stats +10 เฉพาะตอนไอดีเป็น VIP (`vip_status`), rental 30 วัน (ไม่เกิน VIP ที่เหลือ), ทิ้ง/เทรด/ขาย/ฝากคลัง/เมลไม่ได้; `npc/Npc RoX/charm_vip.txt` NPC "Charm VIP" prontera 153,193 แจกตัวละครละ 1 ชิ้นต่อรอบ VIP (ตัวแปร VIPCharmClaim) — ไอดี GM ระบบไม่นับเป็น VIP
 - ไฟล์เก่า npc/custom/charm_system.txt เหลือแค่หมายเหตุว่าย้ายแล้ว (ลบได้)
 - exe ที่มี Charm ติดตั้งแล้ว — exe ก่อน Charm สำรอง `Server\backup_before_charm\`
@@ -71,7 +71,7 @@
 
 1. รัน collect_fix.bat → แพ็กรูป 335 ไอเทมเข้า rox_fix2.grf → ผู้ใช้เช็กตาม checklist
 2. ยืนยัน MsgStringTable ไทยแสดงถูก (UTF-8 vs cp874)
-3. อัตราดรอป Charm (0.05% น่าจะต่ำไป) — รอตัดสินใจ
+3. ~~อัตราดรอป Charm~~ — เสร็จ: ปรับเป็น 0.20% แล้ว (2026-09-28) ต้องรีสตาร์ท Map server หรือ `@reloadscript`
 4. ตัดคำไทยในคำอธิบาย (เว้นวรรคระหว่างคำ) — เสนอไว้ ยังไม่สั่ง
 5. ไฟล์ thRO อื่น (mapname, stateicon, navi ฯลฯ), ไอเทม thRO 6 ตัวที่ server มีแต่ client ไม่มี
 6. แยก GRF ตาม split_map.tsv (run_split.bat ยังไม่รัน), พื้นหลัง Laphine ธีม Ro-X, patch exe เพิ่ม (~14 อย่าง รวม DataFolderFirst)
