@@ -12,6 +12,8 @@
 - ตอนนี้รันแบบ local เท่านั้น (127.0.0.1)
 - NPC ที่ Claude ทำ อยู่โฟลเดอร์ `npc/Npc RoX/` (โหลดใน npc/scripts_custom.conf ส่วน "===== Npc RoX =====", ไฟล์ TIS-620) — ตอนนี้ตั้งไว้ที่ prontera ผู้ใช้จะย้ายแมพเองทีหลัง; เพิ่ม NPC ใหม่ต้องรีสตาร์ท Map server
 
+> รายละเอียด Charm ทั้งหมดแยกไว้ที่ `Charm_changelog.md` (อัปเดตไฟล์นั้นทุกครั้งที่แก้ Charm)
+
 ## ระบบ Charm (ต้นแบบจากเซิร์ฟ Hiclass: D:\Ragnarok Server\RO ServerHiclass Juti800.2025) — ทดสอบผ่านครบ
 - `Type: Charm` (IT_CHARM = 13) ได้โบนัสจาก Script เมื่ออยู่ในกระเป๋า, ซ้อนในช่องเดียวได้ (stackable), ไคลเอนต์เห็นเป็น Etc
 - ฟิลด์ YAML ใหม่: `CharmGroup` (สาย) / `CharmLevel` (ระดับ) — สายเดียวกันให้ผลเฉพาะ N ชิ้นที่ดีที่สุด (`charm_max_per_group: 3` ใน conf/battle/items.conf); ไม่มี CharmGroup = ID ละครั้ง
