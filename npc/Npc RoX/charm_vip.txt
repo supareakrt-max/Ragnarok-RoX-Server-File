@@ -1,0 +1,52 @@
+//===== rAthena Script =======================================
+//= Npc RoX : Charm VIP
+//===== คำอธิบาย ============================================
+//= - แจก Charm VIP (ALL Status +10) ให้ไอดีที่เป็น VIP
+//= - ใช้ได้ 30 วัน (ไม่เกินเวลา VIP ที่เหลือ) ทิ้ง/เทรด/ฝากคลังไม่ได้
+//= - รับได้ตัวละครละ 1 ชิ้นต่อรอบ VIP (ต่อ VIP แล้วรับใหม่ได้)
+//= - โบนัสทำงานเฉพาะตอนไอดียังเป็น VIP
+//= - หมายเหตุ: ไอดี GM (กลุ่มที่มีสิทธิ์ GM) ระบบจะไม่นับเป็น VIP
+//= - ไฟล์นี้บันทึกเป็น TIS-620
+//============================================================
+
+prontera,153,193,6	script	Charm VIP	4_F_KAFRA1,{
+	.@n$ = "[Charm VIP]";
+	mes .@n$;
+	if (!vip_status(VIP_STATUS_ACTIVE)) {
+		mes "Charm VIP มอบให้เฉพาะไอดี VIP เท่านั้น";
+		mes " ";
+		mes "Charm VIP : ALL Status +10";
+		mes "ใช้ได้ " + .days + " วัน เพียงแค่มีไว้ในกระเป๋า";
+		close;
+	}
+	.@expire = vip_status(VIP_STATUS_EXPIRE);
+	.@remain = vip_status(VIP_STATUS_REMAINING);
+	mes "ไอดีของคุณเป็น VIP";
+	mes "เวลา VIP คงเหลือ " + (.@remain / 86400) + " วัน " + ((.@remain % 86400) / 3600) + " ชั่วโมง";
+	if (VIPCharmClaim == .@expire) {
+		mes " ";
+		mes "ตัวละครนี้รับ Charm VIP ของรอบนี้ไปแล้ว";
+		close;
+	}
+	next;
+	if (select("รับ Charm VIP:ไว้ทีหลัง") == 2)
+		close;
+
+	mes .@n$;
+	if (!checkweight(.item, 1)) {
+		mes "กระเป๋าเต็มหรือน้ำหนักเกิน";
+		close;
+	}
+	.@sec = min(.days * 86400, .@remain);
+	rentitem .item, .@sec;
+	VIPCharmClaim = .@expire;
+	mes "มอบ " + getitemname(.item) + " ให้แล้ว";
+	mes "ใช้ได้ " + (.@sec / 86400) + " วัน " + ((.@sec % 86400) / 3600) + " ชั่วโมง";
+	mes "มีไว้ในกระเป๋าก็ได้รับ ALL Status +10 ทันที";
+	close;
+
+OnInit:
+	.item = 60200;	// Charm VIP
+	.days = 30;	// จำนวนวันที่ใช้ได้
+	end;
+}

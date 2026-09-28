@@ -1,0 +1,91 @@
+//===== rAthena Script =======================================
+//= Npc RoX : ส่งของเติมเงิน (Cash Point / VIP) อัตโนมัติ
+//===== คำอธิบาย ============================================
+//= - อ่านตาราง rox_topup ที่หน้าเว็บ topup.php / admin_topup.php ใช้
+//= - รายการที่ GM กดอนุมัติแล้ว (status = approved, delivered = 0)
+//=   จะถูกเติมให้ผู้เล่นเอง ไม่ต้องกดอะไรเพิ่ม
+//=     * ออนไลน์อยู่ : ได้ภายใน ~10 วินาที
+//=     * ออฟไลน์     : ได้ทันทีตอนเข้าเกมครั้งถัดไป
+//= - เติม #CASHPOINTS และต่อ VIP (vip_time) ตามที่อนุมัติ
+//= - ไฟล์นี้บันทึกเป็น TIS-620
+//============================================================
+
+-	script	RoX_TopupDelivery	-1,{
+OnInit:
+	query_sql "CREATE TABLE IF NOT EXISTS `rox_topup` ("
+		+ "`id` int(11) unsigned NOT NULL AUTO_INCREMENT,"
+		+ "`account_id` int(11) unsigned NOT NULL DEFAULT '0',"
+		+ "`userid` varchar(23) NOT NULL DEFAULT '',"
+		+ "`amount` decimal(10,2) NOT NULL DEFAULT '0.00',"
+		+ "`transfer_time` datetime DEFAULT NULL,"
+		+ "`slip_file` varchar(64) NOT NULL DEFAULT '',"
+		+ "`status` varchar(10) NOT NULL DEFAULT 'pending',"
+		+ "`cash` int(11) NOT NULL DEFAULT '0',"
+		+ "`vip_days` int(11) NOT NULL DEFAULT '0',"
+		+ "`note` varchar(255) NOT NULL DEFAULT '',"
+		+ "`ip` varchar(100) NOT NULL DEFAULT '',"
+		+ "`created` datetime NOT NULL,"
+		+ "`reviewed` datetime DEFAULT NULL,"
+		+ "`delivered` tinyint(1) NOT NULL DEFAULT '0',"
+		+ "`delivered_at` datetime DEFAULT NULL,"
+		+ "`char_id` int(11) unsigned NOT NULL DEFAULT '0',"
+		+ "PRIMARY KEY (`id`), KEY `account_id` (`account_id`), KEY `status` (`status`,`delivered`)"
+		+ ") ENGINE=MyISAM DEFAULT CHARSET=utf8";
+	.@c = query_sql("SELECT COUNT(*) FROM `rox_topup` WHERE `status` = 'approved' AND `delivered` = 0", .@wait);
+	debugmes "[RoX Topup] ระบบส่ง Cash พร้อมทำงาน - รอส่ง " + .@wait + " รายการ";
+	initnpctimer;
+	end;
+
+// ตรวจทุก 10 วินาที สำหรับผู้เล่นที่ออนไลน์อยู่
+OnTimer10000:
+	stopnpctimer;
+	.@n = query_sql("SELECT DISTINCT `account_id` FROM `rox_topup` WHERE `status` = 'approved' AND `delivered` = 0 LIMIT 100", .@aid);
+	for (.@i = 0; .@i < .@n; .@i++) {
+		if (isloggedin(.@aid[.@i])) {
+			if (attachrid(.@aid[.@i])) {
+				callsub S_Deliver;
+				detachrid;
+			}
+		}
+	}
+	initnpctimer;
+	end;
+
+// ผู้เล่นเข้าเกม
+OnPCLoginEvent:
+	callsub S_Deliver;
+	end;
+
+// เติมทุกรายการที่ค้างของไอดีที่ attach อยู่
+S_Deliver:
+	.@d_acc = getcharid(3);
+	.@d_cid = getcharid(0);
+	.@d_n = query_sql("SELECT `id`, `cash`, `vip_days`, `amount` FROM `rox_topup` WHERE `account_id` = " + .@d_acc + " AND `status` = 'approved' AND `delivered` = 0 ORDER BY `id`", .@d_tid, .@d_cash, .@d_vip, .@d_amt$);
+	for (.@d_i = 0; .@d_i < .@d_n; .@d_i++) {
+		// ปิดรายการก่อน แล้วเช็กว่าปิดสำเร็จจริง (กันเติมซ้ำ)
+		query_sql "UPDATE `rox_topup` SET `delivered` = 1, `delivered_at` = NOW(), `char_id` = " + .@d_cid + " WHERE `id` = " + .@d_tid[.@d_i] + " AND `delivered` = 0";
+		.@d_ok = 0;
+		query_sql "SELECT ROW_COUNT()", .@d_ok;
+		if (.@d_ok < 1)
+			continue;
+
+		if (.@d_cash[.@d_i] > 0)
+			#CASHPOINTS += .@d_cash[.@d_i];
+		if (.@d_vip[.@d_i] > 0)
+			vip_time .@d_vip[.@d_i] * 1440;	// นาที
+
+		dispbottom "[เติมเงิน] รายการ #" + .@d_tid[.@d_i] + " ยอด " + .@d_amt$[.@d_i] + " บาท อนุมัติแล้ว", 0xE0B45A;
+		if (.@d_cash[.@d_i] > 0)
+			dispbottom "ได้รับ " + callfunc("F_InsertComma", .@d_cash[.@d_i]) + " Cash Point (คงเหลือ " + callfunc("F_InsertComma", #CASHPOINTS) + ")", 0xE0B45A;
+		if (.@d_vip[.@d_i] > 0)
+			dispbottom "ได้รับ VIP " + .@d_vip[.@d_i] + " วัน - ไปรับ Charm VIP ที่ NPC Charm VIP ได้เลย", 0xE0B45A;
+		specialeffect2 EF_ANGEL2;
+		logmes "RoX Topup #" + .@d_tid[.@d_i] + " cash " + .@d_cash[.@d_i] + " vip " + .@d_vip[.@d_i];
+		.@d_amt$[.@d_i] = "";
+	}
+	deletearray .@d_tid;
+	deletearray .@d_cash;
+	deletearray .@d_vip;
+	deletearray .@d_amt$;
+	return;
+}

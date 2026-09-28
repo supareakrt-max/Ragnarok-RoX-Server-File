@@ -1,0 +1,114 @@
+//===== rAthena Script =======================================
+//= Charm System: ดรอป Charm จากมอนสเตอร์ + NPC อัพเกรด Charm
+//===== คำอธิบาย ============================================
+//= - มอนสเตอร์ทุกตัวมีโอกาส 0.05% ให้ Charm +1 (สุ่ม 1 ใน 8 สาย) เข้ากระเป๋าทันที
+//= - NPC อัพเกรด: Charm สายเดียวกัน ระดับเดียวกัน 3 ชิ้น -> ระดับถัดไป 1 ชิ้น (สูงสุด +10)
+//=   ค่าอัพเกรดต่อครั้ง: 1,000,000 Zeny + Elunium 10 + Oridecon 10 (สำเร็จ 100%)
+//= - ไอเท็ม: 60100-60179 (Str, Agi, Vit, Int, Luk, MaxHP, MaxSP, DropRate) ใน db/import/item_db.yml
+//= - ไฟล์นี้บันทึกเป็น TIS-620
+//============================================================
+
+-	script	CharmDrop	-1,{
+OnInit:
+	.rate = 5;		// โอกาสดรอปต่อ 10000 (5 = 0.05%)
+	.base = 60100;		// ID Charm Str +1 (แต่ละสายห่างกัน 10)
+	.lines = 8;		// จำนวนสาย
+	end;
+
+OnNPCKillEvent:
+	if (rand(10000) >= .rate)
+		end;
+	.@id = .base + rand(.lines) * 10;
+	if (!checkweight(.@id, 1)) {
+		dispbottom "กระเป๋าเต็มหรือน้ำหนักเกิน จึงไม่ได้รับ " + getitemname(.@id);
+		end;
+	}
+	getitem .@id, 1;
+	dispbottom "ได้รับ " + getitemname(.@id) + " จากการล่ามอนสเตอร์!";
+	end;
+}
+
+prontera,150,193,6	script	ช่างอัพเกรด Charm	85,{
+	.@n$ = "[ช่างอัพเกรด Charm]";
+	mes .@n$;
+	mes "นำ Charm สายเดียวกัน ระดับเดียวกัน";
+	mes "มา 3 ชิ้น ข้าจะรวมให้เป็นระดับถัดไป 1 ชิ้น";
+	mes "(สูงสุด +10)";
+	mes " ";
+	mes "ค่าอัพเกรดต่อครั้ง:";
+	mes "- " + callfunc("F_InsertComma", .cost) + " Zeny";
+	mes "- Elunium " + .elu + " ชิ้น";
+	mes "- Oridecon " + .ori + " ชิ้น";
+	next;
+
+L_Menu:
+	.@c = 0;
+	.@menu$ = "";
+	deletearray .@list[0], getarraysize(.@list);
+	for (.@i = 0; .@i < .lines * 10; .@i++) {
+		if ((.@i % 10) == 9)
+			continue;	// +10 คือระดับสูงสุดแล้ว
+		.@id = .base + .@i;
+		.@have = countitem(.@id);
+		if (.@have >= 3) {
+			.@list[.@c] = .@id;
+			.@menu$ += getitemname(.@id) + " (มี " + .@have + ") -> +" + ((.@i % 10) + 2) + ":";
+			.@c++;
+		}
+	}
+	if (.@c == 0) {
+		mes .@n$;
+		mes "เจ้ายังไม่มี Charm ระดับเดียวกันครบ 3 ชิ้นเลย";
+		close;
+	}
+	.@menu$ += "ยกเลิก";
+	.@s = select(.@menu$) - 1;
+	if (.@s >= .@c)
+		close;
+
+	.@id = .@list[.@s];
+	.@next = .@id + 1;
+	mes .@n$;
+	mes "ใช้: " + getitemname(.@id) + " x3";
+	mes "ได้: " + getitemname(.@next) + " x1";
+	mes " ";
+	mes "ค่าอัพเกรด " + callfunc("F_InsertComma", .cost) + " Zeny";
+	mes "Elunium " + .elu + " ชิ้น, Oridecon " + .ori + " ชิ้น";
+	next;
+	if (select("อัพเกรดเลย:ยกเลิก") == 2)
+		close;
+
+	mes .@n$;
+	if (countitem(.@id) < 3) {
+		mes "Charm ไม่ครบ 3 ชิ้น";
+		close;
+	}
+	if (Zeny < .cost) {
+		mes "Zeny ไม่พอ ต้องใช้ " + callfunc("F_InsertComma", .cost) + " Zeny";
+		close;
+	}
+	if (countitem(985) < .elu || countitem(984) < .ori) {
+		mes "Elunium หรือ Oridecon ไม่พอ";
+		mes "ต้องใช้อย่างละ 10 ชิ้น";
+		close;
+	}
+	delitem .@id, 3;
+	delitem 985, .elu;
+	delitem 984, .ori;
+	Zeny -= .cost;
+	getitem .@next, 1;
+	specialeffect2 EF_REFINEOK;
+	mes "สำเร็จ! ได้รับ " + getitemname(.@next);
+	next;
+	if (select("อัพเกรดต่อ:พอแล้ว") == 1)
+		goto L_Menu;
+	close;
+
+OnInit:
+	.cost = 1000000;	// Zeny ต่อครั้ง
+	.elu = 10;		// Elunium (985)
+	.ori = 10;		// Oridecon (984)
+	.base = 60100;
+	.lines = 8;
+	end;
+}

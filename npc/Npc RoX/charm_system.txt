@@ -1,0 +1,195 @@
+//===== rAthena Script =======================================
+//= Charm System: ดรอป Charm จากมอนสเตอร์ + NPC อัพเกรด Charm (Charm Forge)
+//===== คำอธิบาย ============================================
+//= - มอนสเตอร์ทุกตัวมีโอกาส 0.05% ให้ Charm +1 (สุ่ม 1 ใน 8 สาย) เข้ากระเป๋าทันที
+//= - NPC อัพเกรด (Charm Forge): ขาย Forge Scroll ตามสาย/ระดับ ด้วย Zeny
+//=   NPC เปิดหน้าต่าง Laphine Synthesis ให้ -> ใส่ Charm + Scroll -> Make (Scroll ถูกใช้ตอน Make เท่านั้น)
+//=   สำเร็จ: ได้ Charm ระดับถัดไป | ล้ม: ได้ Charm ระดับเดิมคืน 1 ชิ้น | Scroll ใช้แล้วหมด
+//= - ระดับ  ใช้  สำเร็จ  ราคา Scroll
+//=   1->2   3   100%      5,000     |  4->5  2  70%    50,000  |  7->8  2  40%   500,000
+//=   2->3   3    90%     10,000     |  5->6  2  60%   100,000  |  8->9  2  30% 1,000,000
+//=   3->4   3    80%     25,000     |  6->7  2  50%   200,000  |  9->10 2  25% 2,000,000
+//= - NPC ร้าน Forge Scroll (prontera 147,193) ขาย Scroll ตามราคาเดียวกัน
+//= - ไอเท็ม: Charm 60100-60179, Forge Scroll 60300-60379 (db/import/item_db.yml)
+//= - สูตร: db/import/laphine_synthesis.yml, โอกาส: db/import/item_group_db.yml
+//=   (ถ้าแก้ % ต้องแก้ใน item_group_db.yml ด้วย ไม่ใช่แค่ในไฟล์นี้)
+//= - ไฟล์นี้บันทึกเป็น TIS-620
+//============================================================
+
+-	script	CharmDrop	-1,{
+OnInit:
+	.rate = 5;		// โอกาสดรอปต่อ 10000 (5 = 0.05%)
+	.base = 60100;		// ID Charm Str +1 (แต่ละสายห่างกัน 10)
+	.lines = 8;		// จำนวนสาย
+	end;
+
+OnNPCKillEvent:
+	if (rand(10000) >= .rate)
+		end;
+	.@id = .base + rand(.lines) * 10;
+	if (!checkweight(.@id, 1)) {
+		dispbottom "กระเป๋าเต็มหรือน้ำหนักเกิน จึงไม่ได้รับ " + getitemname(.@id);
+		end;
+	}
+	getitem .@id, 1;
+	dispbottom "ได้รับ " + getitemname(.@id) + " จากการล่ามอนสเตอร์!";
+	end;
+}
+
+prontera,150,193,6	script	ช่างอัพเกรด Charm	85,{
+	.@n$ = "[ช่างอัพเกรด Charm]";
+	mes .@n$;
+	mes "ข้าตีบวก Charm ด้วย ^0055FFForge Scroll^000000";
+	mes "เลือก Charm ที่จะตีบวก ข้าจะเปิดเตาหลอมให้";
+	mes "ใส่ Charm + Scroll ลงในหน้าต่าง แล้วกด Make";
+	mes " ";
+	mes "สำเร็จ: ได้ Charm ระดับถัดไป";
+	mes "ล้ม: ได้ Charm ระดับเดิมคืน 1 ชิ้น";
+	next;
+	switch (select("ตีบวก Charm:ดูตารางโอกาสสำเร็จ:ยกเลิก")) {
+	case 2:
+		mes .@n$;
+		for (.@lv = 1; .@lv <= 9; .@lv++)
+			mes "+" + .@lv + " -> +" + (.@lv + 1) + " : ใช้ " + .need[.@lv] + " ชิ้น  ^0055FF" + .rate[.@lv] + "%^000000  " + callfunc("F_InsertComma", .price[.@lv]) + "z";
+		close;
+	case 3:
+		close;
+	}
+
+L_Menu:
+	.@c = 0;
+	.@menu$ = "";
+	deletearray .@list[0], getarraysize(.@list);
+	for (.@i = 0; .@i < .lines * 10; .@i++) {
+		.@lv = (.@i % 10) + 1;
+		if (.@lv >= 10)
+			continue;	// +10 คือระดับสูงสุดแล้ว
+		.@id = .base + .@i;
+		.@have = countitem(.@id);
+		if (.@have >= .need[.@lv]) {
+			.@list[.@c] = .@i;
+			.@menu$ += getitemname(.@id) + " (มี " + .@have + ") -> +" + (.@lv + 1) + " [" + .rate[.@lv] + "%]:";
+			.@c++;
+		}
+	}
+	if (.@c == 0) {
+		mes .@n$;
+		mes "เจ้ายังไม่มี Charm ระดับเดียวกันครบจำนวนเลย";
+		mes "(+1 ถึง +3 ใช้ 3 ชิ้น, +4 ขึ้นไปใช้ 2 ชิ้น)";
+		close;
+	}
+	.@menu$ += "ยกเลิก";
+	.@s = select(.@menu$) - 1;
+	if (.@s >= .@c)
+		close;
+
+	.@i = .@list[.@s];
+	.@lv = (.@i % 10) + 1;
+	.@id = .base + .@i;
+	.@scroll = .scroll + .@i;
+	mes .@n$;
+	mes "Charm: " + getitemname(.@id) + " x" + .need[.@lv];
+	mes "สำเร็จ ^0055FF" + .rate[.@lv] + "%^000000 -> " + getitemname(.@id + 1);
+	if (.rate[.@lv] < 100)
+		mes "ล้ม ^FF0000" + (100 - .rate[.@lv]) + "%^000000 -> ได้ " + getitemname(.@id) + " คืน 1 ชิ้น";
+	mes " ";
+	.@has = countitem(.@scroll);
+	if (.@has > 0) {
+		mes "เจ้ามี " + getitemname(.@scroll) + " อยู่แล้ว " + .@has + " ใบ";
+		next;
+		if (select("เปิดเตาหลอม:ยกเลิก") == 2)
+			close;
+	} else {
+		mes "ต้องใช้ " + getitemname(.@scroll) + " 1 ใบ";
+		mes "ราคา " + callfunc("F_InsertComma", .price[.@lv]) + " Zeny";
+		next;
+		if (select("ซื้อ Scroll และเปิดเตาหลอม:ยกเลิก") == 2)
+			close;
+		if (Zeny < .price[.@lv]) {
+			mes .@n$;
+			mes "Zeny ไม่พอ ต้องใช้ " + callfunc("F_InsertComma", .price[.@lv]) + " Zeny";
+			close;
+		}
+		if (!checkweight(.@scroll, 1)) {
+			mes .@n$;
+			mes "กระเป๋าเต็มหรือน้ำหนักเกิน";
+			close;
+		}
+		Zeny -= .price[.@lv];
+		getitem .@scroll, 1;
+	}
+	mes .@n$;
+	mes "ใส่ ^0055FF" + getitemname(.@id) + " x" + .need[.@lv] + "^000000";
+	mes "และ ^0055FF" + getitemname(.@scroll) + " x1^000000";
+	mes "ลงในหน้าต่าง แล้วกด ^FF0000Make^000000";
+	mes "(ถ้ากดยกเลิก Scroll จะยังอยู่ในกระเป๋า)";
+	close2;
+	laphine_synthesis .@scroll;
+	end;
+
+OnInit:
+	.base = 60100;		// Charm Str +1 (แต่ละสายห่างกัน 10)
+	.scroll = 60300;	// Forge Scroll Str +1 (แต่ละสายห่างกัน 10)
+	.lines = 8;
+	setarray .need[1], 3, 3, 3, 2, 2, 2, 2, 2, 2;
+	setarray .rate[1], 100, 90, 80, 70, 60, 50, 40, 30, 25;	// แสดงผลเท่านั้น ค่าจริงอยู่ใน item_group_db.yml
+	setarray .price[1], 5000, 10000, 25000, 50000, 100000, 200000, 500000, 1000000, 2000000;
+	end;
+}
+
+prontera,147,193,6	script	ร้าน Forge Scroll	86,{
+	.@n$ = "[ร้าน Forge Scroll]";
+	mes .@n$;
+	mes "ขาย ^0055FFForge Scroll^000000 สำหรับตีบวก Charm";
+	mes "นำไปใช้กับช่างอัพเกรด Charm ข้าง ๆ นี่";
+	mes "Scroll จะถูกใช้เมื่อกด Make เท่านั้น";
+	next;
+	.@menu$ = "";
+	for (.@l = 0; .@l < .lines; .@l++)
+		.@menu$ += "Scroll " + .name$[.@l] + ":";
+	.@l = select(.@menu$ + "ยกเลิก") - 1;
+	if (.@l >= .lines)
+		close;
+	.@menu$ = "";
+	for (.@lv = 1; .@lv <= 9; .@lv++)
+		.@menu$ += .name$[.@l] + " +" + .@lv + " -> +" + (.@lv + 1) + "  (" + callfunc("F_InsertComma", .price[.@lv]) + "z):";
+	.@lv = select(.@menu$ + "ยกเลิก");
+	if (.@lv > 9)
+		close;
+	.@id = .scroll + .@l * 10 + (.@lv - 1);
+	mes .@n$;
+	mes getitemname(.@id);
+	mes "ราคา ^0055FF" + callfunc("F_InsertComma", .price[.@lv]) + "^000000 Zeny / ใบ";
+	mes "ต้องการซื้อกี่ใบ? (1-100)";
+	next;
+	input .@amt, 0, 100;
+	if (.@amt < 1)
+		close;
+	.@cost = .price[.@lv] * .@amt;
+	mes .@n$;
+	mes getitemname(.@id) + " x" + .@amt;
+	mes "รวม ^FF0000" + callfunc("F_InsertComma", .@cost) + "^000000 Zeny";
+	next;
+	if (select("ซื้อ:ยกเลิก") == 2)
+		close;
+	mes .@n$;
+	if (Zeny < .@cost) {
+		mes "Zeny ไม่พอ";
+		close;
+	}
+	if (!checkweight(.@id, .@amt)) {
+		mes "กระเป๋าเต็มหรือน้ำหนักเกิน";
+		close;
+	}
+	Zeny -= .@cost;
+	getitem .@id, .@amt;
+	mes "ขอบคุณที่อุดหนุน!";
+	close;
+
+OnInit:
+	.scroll = 60300;
+	.lines = 8;
+	setarray .name$[0], "STR", "AGI", "VIT", "INT", "LUK", "MaxHP", "MaxSP", "Drop";
+	setarray .price[1], 5000, 10000, 25000, 50000, 100000, 200000, 500000, 1000000, 2000000;
+	end;
+}

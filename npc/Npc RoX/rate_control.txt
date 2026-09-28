@@ -1,0 +1,91 @@
+//===== rAthena Script =======================================
+//= Npc RoX : ปรับอัตรา EXP / Drop แบบ realtime (สั่งจาก RO_Manager)
+//===== คำอธิบาย ============================================
+//= - RO_Manager (แท็บ "อัตรา EXP / Drop") เขียนคำสั่งลงตาราง rox_rate
+//= - NPC นี้อ่านทุก 3 วินาที -> setbattleflag (ไม่ต้องรีสตาร์ท) -> ประกาศในเกม
+//= - ค่าตัวคูณเก็บเป็นเปอร์เซ็นต์ของค่าปกติใน conf (100 = x1, 200 = x2, 150 = x1.5)
+//= - ตั้งเวลาได้ (minutes) ครบเวลาแล้วคืนค่า x1 และประกาศให้เอง
+//= - รีสตาร์ทเซิร์ฟระหว่าง event: ระบบใช้ค่าที่ยังไม่หมดเวลาต่อให้อัตโนมัติ
+//= - สถานะปัจจุบันเขียนลงตาราง rox_rate_state ให้ RO_Manager แสดงผล
+//= - ไฟล์นี้บันทึกเป็น TIS-620
+//============================================================
+
+-	script	RoX_RateCtl	-1,{
+OnInit:
+	query_sql "CREATE TABLE IF NOT EXISTS `rox_rate` (`id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,`exp_mult` INT NOT NULL DEFAULT 100,`drop_mult` INT NOT NULL DEFAULT 100,`minutes` INT NOT NULL DEFAULT 0,`msg` VARCHAR(200) NOT NULL DEFAULT '',`status` TINYINT NOT NULL DEFAULT 0,`until_ts` INT UNSIGNED NOT NULL DEFAULT 0,`created` DATETIME NULL,`applied` DATETIME NULL) ENGINE=MyISAM";
+	query_sql "CREATE TABLE IF NOT EXISTS `rox_rate_state` (`id` TINYINT NOT NULL PRIMARY KEY,`exp_mult` INT NOT NULL DEFAULT 100,`drop_mult` INT NOT NULL DEFAULT 100,`base_exp` INT NOT NULL DEFAULT 0,`job_exp` INT NOT NULL DEFAULT 0,`drop_common` INT NOT NULL DEFAULT 0,`def_exp` INT NOT NULL DEFAULT 0,`def_drop` INT NOT NULL DEFAULT 0,`until_ts` INT UNSIGNED NOT NULL DEFAULT 0,`updated` DATETIME NULL) ENGINE=MyISAM";
+
+	// ค่าปกติจาก conf (อ่านตอนเปิดเซิร์ฟ)
+	setarray .flag$[0],
+		"item_rate_common", "item_rate_common_boss", "item_rate_common_mvp",
+		"item_rate_heal", "item_rate_heal_boss", "item_rate_heal_mvp",
+		"item_rate_use", "item_rate_use_boss", "item_rate_use_mvp",
+		"item_rate_equip", "item_rate_equip_boss", "item_rate_equip_mvp",
+		"item_rate_card", "item_rate_card_boss", "item_rate_card_mvp",
+		"item_rate_mvp", "item_rate_treasure";
+	.n = getarraysize(.flag$);
+	for (.@i = 0; .@i < .n; .@i++)
+		.def[.@i] = getbattleflag(.flag$[.@i]);
+	.def_bexp = getbattleflag("base_exp_rate");
+	.def_jexp = getbattleflag("job_exp_rate");
+	.exp = 100;
+	.drop = 100;
+	.until = 0;
+
+	// รีสตาร์ทระหว่าง event -> ใช้ค่าล่าสุดต่อ ถ้ายังไม่หมดเวลา
+	query_sql "SELECT `exp_mult`, `drop_mult`, `until_ts` FROM `rox_rate` WHERE `status`=1 ORDER BY `id` DESC LIMIT 1", .@e, .@d, .@u;
+	if (getarraysize(.@e)) {
+		if ((.@e != 100 || .@d != 100) && (.@u == 0 || .@u > gettimetick(2))) {
+			callsub S_Apply, .@e, .@d, .@u;
+			debugmes "[RoX Rate] ใช้อัตรา event ต่อจากก่อนรีสตาร์ท: EXP " + .@e + "% / Drop " + .@d + "%";
+		}
+	}
+	callsub S_State;
+	debugmes "[RoX Rate] พร้อมรับคำสั่งจาก RO_Manager";
+	initnpctimer;
+	end;
+
+OnTimer3000:
+	stopnpctimer;
+	// ครบเวลา event -> คืนค่าปกติ
+	if (.until > 0 && gettimetick(2) >= .until) {
+		callsub S_Apply, 100, 100, 0;
+		callsub S_State;
+		announce "[Ro-X] Event EXP / Drop สิ้นสุดแล้ว — กลับสู่อัตราปกติ", bc_all, 0xFFD700;
+	}
+	// คำสั่งใหม่จาก RO_Manager
+	query_sql "SELECT `id`, `exp_mult`, `drop_mult`, `minutes`, `msg` FROM `rox_rate` WHERE `status`=0 ORDER BY `id` ASC LIMIT 1", .@id, .@e, .@d, .@min, .@msg$;
+	if (getarraysize(.@id)) {
+		.@e = cap_value(.@e, 10, 10000);
+		.@d = cap_value(.@d, 10, 10000);
+		.@u = (.@min > 0) ? gettimetick(2) + .@min * 60 : 0;
+		query_sql "UPDATE `rox_rate` SET `status`=1, `applied`=NOW(), `until_ts`=" + .@u + " WHERE `id`=" + .@id;
+		callsub S_Apply, .@e, .@d, .@u;
+		callsub S_State;
+		if (.@msg$ != "")
+			announce .@msg$, bc_all, 0xFFD700;
+		debugmes "[RoX Rate] ปรับอัตราเป็น EXP " + .@e + "% / Drop " + .@d + "% (" + .@min + " นาที)";
+	}
+	initnpctimer;
+	end;
+
+// getarg(0)=exp%  getarg(1)=drop%  getarg(2)=until (unix, 0=ไม่จำกัด)
+S_Apply:
+	.exp = getarg(0);
+	.drop = getarg(1);
+	.until = getarg(2);
+	setbattleflag "base_exp_rate", max(1, .def_bexp * .exp / 100);
+	setbattleflag "job_exp_rate", max(1, .def_jexp * .exp / 100);
+	for (.@i = 0; .@i < .n; .@i++) {
+		.@v = max(1, .def[.@i] * .drop / 100);
+		if (.@i == .n - 1)
+			setbattleflag .flag$[.@i], .@v, true;	// ตัวสุดท้ายสั่งโหลดข้อมูลมอนใหม่ครั้งเดียว
+		else
+			setbattleflag .flag$[.@i], .@v;
+	}
+	return;
+
+S_State:
+	query_sql "REPLACE INTO `rox_rate_state` (`id`,`exp_mult`,`drop_mult`,`base_exp`,`job_exp`,`drop_common`,`def_exp`,`def_drop`,`until_ts`,`updated`) VALUES (1," + .exp + "," + .drop + "," + getbattleflag("base_exp_rate") + "," + getbattleflag("job_exp_rate") + "," + getbattleflag("item_rate_common") + "," + .def_bexp + "," + .def[0] + "," + .until + ",NOW())";
+	return;
+}
