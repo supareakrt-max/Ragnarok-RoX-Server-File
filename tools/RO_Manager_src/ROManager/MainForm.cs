@@ -1621,6 +1621,10 @@ internal partial class MainForm : Form
 		{
 			Unban();
 		}, 100));
+		((Control)val3).Controls.Add((Control)(object)Btn("ลบไอดี", delegate
+		{
+			DeleteAccount();
+		}, 100));
 		CheckBox val6 = new CheckBox();
 		((Control)val6).Text = "แสดงรห\u0e31สผ\u0e48าน";
 		((Control)val6).AutoSize = true;
