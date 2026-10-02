@@ -1,5 +1,5 @@
 //===== rAthena Script =======================================
-//= Ro-X Player AI - เมนู @ai (ขั้นที่ 1-5)
+//= Ro-X Player AI - เมนู @ai (ขั้นที่ 1-6)
 //===== คำอธิบาย ============================================
 //= - @ai        เปิดหน้าต่างตั้งค่า AI
 //= - @ai on     เปิด AI ทันที
@@ -13,6 +13,9 @@
 //=   ซัพพอร์ต: AI_ROLE AI_LEADER AI_LEADERN$ AI_FOLLOW AI_HEALSK[0] AI_HEALPCT AI_PBUFF[] AI_RES
 //= - เวลาใช้งาน AI: #AI_TIME (วินาที, ต่อไอดี) นับถอยหลังเฉพาะตอน AI ทำงาน
 //=   ซื้อ 4 ชม. = 1,000,000 Zeny หรือ 2 Cash Point (แก้ราคาได้ที่ OnInit)
+//=   โหมดซัพพอร์ต ใช้ฟรี ไม่หักเวลา
+//= - ไอเทม AI Controller (.item_id) กดใช้ = เปิดเมนูนี้ (ไม่หาย, ทิ้ง/ขาย/ใส่รถเข็นไม่ได้)
+//=   ต้องเพิ่มไอเทมใน db/import/item_db.yml ก่อน (ดู ai_system/db/item_db_ai.yml)
 //= - ไฟล์นี้บันทึกเป็น TIS-620
 //============================================================
 
@@ -29,7 +32,23 @@ OnInit:
 	.buy_cash = 2;			// ราคา Cash Point (#CASHPOINTS)
 	.max_hours = 720;		// เก็บเวลาสะสมได้สูงสุด (ชม.)
 	.gm_level = 99;			// GM เลเวลนี้ขึ้นไป เติมเวลาฟรีได้
+	// ----- ไอเทมเปิดเมนู AI -----
+	.item_id = 60400;		// AI Controller
+	.give_item = 1;			// 1 = แจกตัวละครละ 1 ชิ้นตอนล็อกอินครั้งแรก
 	end;
+
+// แจกไอเทม AI Controller ตัวละครละ 1 ครั้ง
+OnPCLoginEvent:
+	if (.give_item && !AI_ITEMGIVEN && getitemname(.item_id) != "null") {
+		AI_ITEMGIVEN = 1;
+		if (!countitem(.item_id))
+			getitem .item_id, 1;
+	}
+	end;
+
+// กดใช้ไอเทม AI Controller (item script: doevent "AI_Menu::OnItem";)
+OnItem:
+	goto L_Main;
 
 OnAtcmd:
 	.@arg$ = strtolower(.@atcmd_parameters$[0]);
@@ -43,10 +62,15 @@ OnAtcmd:
 	}
 
 L_Main:
-	clear;
+	if (.@shown)
+		clear;
+	.@shown = 1;
 	mes .n$;
 	mes "สถานะ: " + (ai_status() ? "^00AA00เปิดอยู่^000000" : "^FF0000ปิดอยู่^000000") + "   โหมด: ^0055FF" + .role$[AI_ROLE] + "^000000";
-	mes "เวลา AI เหลือ: ^0055FF" + callsub(S_TimeStr, #AI_TIME) + "^000000";
+	if (AI_ROLE == 1)
+		mes "เวลา AI: ^00AA00ฟรี (โหมดซัพพอร์ต)^000000";
+	else
+		mes "เวลา AI เหลือ: ^0055FF" + callsub(S_TimeStr, #AI_TIME) + "^000000";
 	if (AI_ROLE == 1)
 		mes "ตาม: ^0055FF" + (AI_LEADER ? AI_LEADERN$ : "- ยังไม่เลือก -") + "^000000";
 	else
@@ -98,6 +122,7 @@ S_Buy:
 	mes .n$;
 	mes "เวลา AI เหลือ: ^0055FF" + callsub(S_TimeStr, #AI_TIME) + "^000000";
 	mes "(ใช้ได้ทุกตัวละครในไอดี นับเฉพาะตอน AI ทำงาน)";
+	mes "^00AA00โหมดซัพพอร์ต ใช้ฟรี ไม่ต้องซื้อเวลา^000000";
 	mes "ซื้อ " + .buy_hours + " ชม.:";
 	mes "- " + callfunc("F_InsertComma", .buy_zeny) + " Zeny  (มี " + callfunc("F_InsertComma", Zeny) + ")";
 	mes "- " + .buy_cash + " Cash Point  (มี " + #CASHPOINTS + ")";
@@ -145,7 +170,7 @@ S_Support:
 		mes "ตาม: ^0055FF" + (AI_LEADER ? AI_LEADERN$ : "- ยังไม่เลือก -") + "^000000  ระยะ " + (AI_FOLLOW ? AI_FOLLOW : 3) + " ช่อง";
 		mes "ฮีล: " + (AI_HEALSK[0] ? ai_skillname(AI_HEALSK[0]) + " เมื่อ HP < " + (AI_HEALPCT ? AI_HEALPCT : 70) + "%" : "ไม่ฮีล");
 		mes "ชุบชีวิต: " + (AI_RES ? "เปิด" : "ปิด");
-		mes "บัฟปาร์ตี้:";
+		mes "บัฟปาร์ตี้ (รวม Magnificat / Gloria):";
 		callsub S_ShowSkills, "AI_PBUFF", 6;
 		switch (select("เลือกคนที่จะตาม (ในปาร์ตี้):ตั้งระยะตาม:เลือกสกิลฮีล:ตั้ง % HP ที่จะฮีล:เพิ่มบัฟปาร์ตี้:ลบบัฟปาร์ตี้:" + (AI_RES ? "ปิด" : "เปิด") + " ชุบชีวิต:กลับ")) {
 		case 1:
@@ -226,7 +251,10 @@ S_On:
 	if (getarg(0)) {
 		mes .@m$;
 		if (.@r == 1) {
-			mes "เวลา AI เหลือ: " + callsub(S_TimeStr, #AI_TIME);
+			if (AI_ROLE == 1)
+				mes "โหมดซัพพอร์ต ใช้ฟรี";
+			else
+				mes "เวลา AI เหลือ: " + callsub(S_TimeStr, #AI_TIME);
 			mes "ปิดหน้าต่างนี้เพื่อเริ่มทำงาน";
 		}
 	} else
@@ -390,7 +418,8 @@ S_PickSkill:
 		if (@skilllist_lv[.@i] < 1)
 			continue;
 		.@t = ai_skilltype(.@id);
-		if (.@t != .@type && !(.@type == 2 && .@t == 4))	// บัฟตัวเองเลือกบัฟที่ใส่คนอื่นได้ด้วย
+		// บัฟตัวเองเลือกบัฟที่ใส่คนอื่นได้ด้วย / บัฟปาร์ตี้เลือกสกิลร่ายใส่ตัวที่มีผลทั้งปาร์ตี้ได้ (Magnificat, Gloria ...)
+		if (.@t != .@type && !(.@type == 2 && .@t == 4) && !(.@type == 4 && .@t == 2))
 			continue;
 		for (.@j = 0; .@j < .@max; .@j++)
 			if (getd(.@var$ + "[" + .@j + "]") == .@id)

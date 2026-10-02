@@ -1,0 +1,28 @@
+# Ro-X Player AI - ไอเทมเปิดเมนู AI
+# วิธีใส่: ก๊อปส่วน "- Id: 60400 ..." ไปต่อท้ายใต้ Body: ใน Server\db\import\item_db.yml
+# (ถ้า ID 60400 ชนกับไอเทมที่มีอยู่ ให้เปลี่ยน ID ที่นี่ และ .item_id ใน ai_menu.txt ให้ตรงกัน)
+#
+# - กดใช้ = เปิดหน้าต่าง @ai (ไอเทมไม่หาย - NoConsume)
+# - ทิ้งลงพื้นไม่ได้ / ขาย NPC ไม่ได้ / ใส่รถเข็นไม่ได้ (เปิดร้านขายไม่ได้) / ส่งเมลไม่ได้
+# - เทรดและฝากคลังได้ (ถ้าไม่ต้องการ เพิ่ม NoTrade: true / NoStorage: true)
+
+Header:
+  Type: ITEM_DB
+  Version: 3
+
+Body:
+  - Id: 60400
+    AegisName: RoX_AI_Controller
+    Name: AI Controller
+    Type: Usable
+    Weight: 0
+    Flags:
+      NoConsume: true
+    Trade:
+      NoDrop: true
+      NoSell: true
+      NoCart: true
+      NoMail: true
+      NoAuction: true
+    Script: |
+      doevent "AI_Menu::OnItem";
